@@ -1,0 +1,132 @@
+<resources>
+    <string name="app_name">PastillApp</string>
+    <string name="login_title">PastillApp</string>
+    <string name="login_button">Iniciar Sesión</string>
+    <string name="username_hint">Correo Electronico</string>
+    <string name="password_hint">Contraseña</string>
+    <string name="title_home">Inicio</string>
+    <string name="title_calendar">Calendario</string>
+    <string name="title_connection">Conexión</string>
+    <string name="title_account">Cuenta</string>
+    <string name="title_logout">Cerrar Sesión</string>
+
+    <!-- Home Screen -->
+    <string name="home_title">PastillApp Control</string>
+    <string name="home_subtitle">Gestiona tu pastillero inteligente</string>
+    <string name="compartment_control_title">Control de Compartimentos</string>
+    <string name="open_compartment_button">Abrir Compartimento</string>
+    <string name="light_sensor_title">Sensor de Luz</string>
+    <string name="light_level_label">Nivel de Luz:</string>
+    <string name="light_value">%1$d lux</string>
+    <string name="alarm_control_title">Control de Alarma</string>
+    <string name="silence_alarm_button">Silenciar Alarma</string>
+    <string name="alarm_active">Alarma Activa</string>
+    <string name="alarm_inactive">Alarma Inactiva</string>
+    <string name="device_not_connected">Dispositivo no conectado</string>
+    <string name="connect_device_message">Conecta tu PastillApp para controlar el dispositivo</string>
+    <string name="compartment_opened">Compartimento abierto</string>
+    <string name="alarm_silenced">Alarma silenciada</string>
+    <string name="error_opening_compartment">Error al abrir compartimento</string>
+    <string name="error_silencing_alarm">Error al silenciar alarma</string>
+
+    <!-- Connection Screen-->
+    <string name="connection_title">Conexión</string>
+    <string name="no_conn">No hay dispositivo enlazado</string>
+    <string name="connect_button">Conectar</string>
+    <string name="disconnect_button">Desconectar</string>
+    <string name="connection_status">Estado de Conexión</string>
+    <string name="connection_status_connected">Conectado</string>
+    <string name="connection_status_disconnected">Desconectado</string>
+    <string name="connection_status_connecting">Conectando...</string>
+    <string name="connection_status_disconnecting">Desconectando...</string>
+    <string name="connection_header_title">Gestión de Dispositivos</string>
+    <string name="connection_subtitle">Conecta tu PastillApp para gestionar tus medicamentos</string>
+    <string name="connected_device_title">Dispositivo Conectado</string>
+    <string name="available_devices_title">Dispositivos Disponibles</string>
+    <string name="find_devices_button">Buscar Dispositivos</string>
+    <string name="searching_devices">Buscando dispositivos...</string>
+    <string name="no_devices_found">No se encontraron dispositivos</string>
+    <string name="bluetooth_disabled">Bluetooth desactivado</string>
+    <string name="enable_bluetooth">Activar Bluetooth</string>
+    <string name="connection_instructions">Asegúrate de que tu dispositivo PastillApp esté encendido y el Bluetooth activado</string>
+    <string name="connection_error">Error de conexión</string>
+    <string name="connection_success">Dispositivo conectado exitosamente</string>
+    <string name="disconnection_success">Dispositivo desconectado</string>
+    <string name="device_name_label">Nombre:</string>
+    <string name="device_address_label">Dirección:</string>
+    <string name="connection_strength">Señal:</string>
+    <string name="last_connected">Última conexión:</string>
+    <string name="never_connected">Nunca</string>
+    
+    <!-- Bluetooth Pairing -->
+    <string name="pairing_title">Emparejar Dispositivo</string>
+    <string name="pairing_message">¿Desea emparejar con \'%1$s\'?\n\nSi el dispositivo requiere un PIN, el sistema le solicitará ingresarlo.</string>
+    <string name="pairing_button">Emparejar</string>
+    <string name="pairing_success">Emparejamiento exitoso con %1$s</string>
+    <string name="pairing_failed">Falló el emparejamiento con %1$s</string>
+    <string name="pairing_in_progress">Iniciando emparejamiento...</string>
+    <string name="pairing_error">No se pudo iniciar el emparejamiento</string>
+    <string name="device_already_paired">Dispositivo ya emparejado</string>
+    <string name="unpair_button">Desemparejar</string>
+    <string name="unpair_success">Dispositivo desemparejado</string>
+    <string name="unpair_failed">Error al desemparejar dispositivo</string>
+    
+
+    <!-- Account Screen -->
+    <string name="account_title">Cuenta</string>
+    <string name="account_button">Cerrar Sesión</string>
+
+    
+    <!-- Login error messages -->
+    <string name="error_empty_fields">Debe rellenar todos los campos.</string>
+    <string name="error_empty_email">Debe rellenar este campo</string>
+    <string name="error_empty_password">Debe rellenar este campo</string>
+    <string name="error_invalid_credentials">Credenciales inválidas. Por favor, verifica tu correo y contraseña.</string>
+    <string name="error_invalid_email">El formato del correo electrónico no es válido.</string>
+    <string name="error_weak_password">La contraseña debe tener al menos 6 caracteres.</string>
+    <string name="error_email_not_confirmed">Por favor, confirma tu correo electrónico.</string>
+    <string name="error_user_not_found">No se encontró una cuenta con este correo.</string>
+    <string name="error_too_many_requests">Demasiados intentos. Por favor, intenta más tarde.</string>
+    <string name="error_network">Error de conexión. Verifica tu internet.</string>
+    <string name="error_auth_failed">Error de autenticación.</string>
+    <string name="error_unknown">Ocurrió un error inesperado. Por favor, intenta de nuevo.</string>
+    <string name="error_field_length">El campo no puede tener menos de 8 caracteres.</string>
+    
+    <!-- Register screen -->
+    <string name="register_title">Crear Cuenta</string>
+    <string name="register_button">Registrarse</string>
+    <string name="confirm_password_hint">Confirmar Contraseña</string>
+    <string name="already_have_account">¿Ya tienes cuenta? Inicia sesión</string>
+    <string name="no_account">¿No tienes cuenta? Regístrate</string>
+    <string name="password_requirements">La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas, números y símbolos.</string>
+    
+    <!-- Register error messages -->
+    <string name="error_email_length">El correo debe tener al menos 8 caracteres.</string>
+    <string name="error_password_length">La contraseña debe tener al menos 8 caracteres.</string>
+    <string name="error_password_complexity">La contraseña debe incluir mayúsculas, minúsculas, números y símbolos.</string>
+    <string name="error_empty_confirm_password">Debe confirmar la contraseña</string>
+    <string name="error_passwords_not_match">Las contraseñas no coinciden.</string>
+    <string name="error_fix_fields">Por favor, corrige los errores en el formulario.</string>
+    <string name="register_success">¡Registro exitoso! Bienvenido.</string>
+    <string name="error_user_already_exists">Este correo ya está registrado.</string>
+    
+    <!-- Calendar screen -->
+    <string name="calendar_title">Calendario de Medicamentos</string>
+    <string name="selected_date_label">Eventos para la fecha seleccionada</string>
+    <string name="events_for_date">Eventos para %1$s</string>
+    <string name="no_events_message">No hay medicamentos programados para esta fecha</string>
+    <string name="add_event_description">Agregar evento de medicamento</string>
+    <string name="add_event_title">Agregar Medicamento</string>
+    <string name="pill_name_hint">Nombre del medicamento</string>
+    <string name="amount_hint">Cantidad (ej: 1 tableta, 5ml)</string>
+    <string name="time_hint">Hora (opcional)</string>
+    <string name="save_button">Guardar</string>
+    <string name="delete_event_description">Eliminar evento</string>
+    <string name="delete_event_title">Eliminar Medicamento</string>
+    <string name="delete_event_message">¿Estás segura de que deseas eliminar %1$s?</string>
+    <string name="delete_button">Eliminar</string>
+    <string name="error_empty_pill_name">Debe ingresar el nombre del medicamento</string>
+    <string name="error_empty_amount">Debe ingresar la cantidad</string>
+    <string name="event_added_success">Medicamento agregado correctamente</string>
+    <string name="event_deleted_success">Medicamento eliminado</string>
+</resources>
