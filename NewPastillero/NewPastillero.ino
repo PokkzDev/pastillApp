@@ -37,6 +37,8 @@
 #include <BluetoothSerial.h>
 #include <Preferences.h>
 #include <math.h>
+#include "mbedtls/aes.h"
+#include "mbedtls/base64.h"
 
 BluetoothSerial SerialBT;
 Servo servoMotor;
@@ -56,7 +58,7 @@ const int PIN_LDR       = 35;   // GPIO35: ADC1_CH7, divisor de voltaje con LDR
 // ============================================================================
 const int PULSO_MIN = 500;      // µs (~0°)
 const int PULSO_MAX = 2400;     // µs (~180°)
-const int ANGULO_CERRADO = 10;  // grados - posición cerrada
+const int ANGULO_CERRADO = 0;  // grados - posición cerrada
 const int ANGULO_ABIERTO = 90;  // grados - posición abierta
 
 // ============================================================================
@@ -118,6 +120,19 @@ const char* UUID_KEY = "device_uuid";
 bool uuidEnviado = false;
 
 // ============================================================================
+// ENCRIPTACIÓN AES-256-CBC
+// ============================================================================
+// Clave compartida (32 bytes = 256 bits) - DEBE SER LA MISMA QUE EN ANDROID
+const unsigned char AES_KEY[32] = {
+  0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6,
+  0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C,
+  0x1A, 0x2B, 0x3C, 0x4D, 0x5E, 0x6F, 0x70, 0x81,
+  0x92, 0xA3, 0xB4, 0xC5, 0xD6, 0xE7, 0xF8, 0x09
+};
+const int AES_IV_SIZE = 16; // 128 bits
+const int AES_BLOCK_SIZE = 16; // 128 bits
+
+// ============================================================================
 // FUNCIONES AUXILIARES
 // ============================================================================
 
@@ -167,10 +182,13 @@ const char* getNombreEstado() {
 }
 
 /**
- * Envía el estado actual por Bluetooth
+ * Envía el estado actual por Bluetooth (sin encriptar, usado internamente)
  */
 void enviarEstado() {
   if (SerialBT.hasClient()) {
+    char statusMsg[64];
+    snprintf(statusMsg, sizeof(statusMsg), "STATUS:%s", getNombreEstado());
+    // Enviar sin encriptar ya que es notificación automática
     SerialBT.print("STATUS:");
     SerialBT.println(getNombreEstado());
   }
@@ -273,6 +291,174 @@ void silenciarAlarma() {
 }
 
 /**
+ * Desencripta un mensaje encriptado con AES-256-CBC
+ * @param encryptedBase64 String Base64 que contiene: IV(16 bytes) + Datos encriptados
+ * @param output Buffer para almacenar el texto desencriptado
+ * @param outputSize Tamaño del buffer de salida
+ * @return true si la desencriptación fue exitosa
+ */
+bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize) {
+  mbedtls_aes_context aes;
+  mbedtls_aes_init(&aes);
+  
+  // Decodificar Base64
+  size_t olen;
+  unsigned char* decoded = (unsigned char*)malloc(strlen(encryptedBase64) * 3 / 4 + 1);
+  if (!decoded) {
+    mbedtls_aes_free(&aes);
+    return false;
+  }
+  
+  int ret = mbedtls_base64_decode(decoded, strlen(encryptedBase64) * 3 / 4 + 1, &olen, 
+                                   (const unsigned char*)encryptedBase64, strlen(encryptedBase64));
+  if (ret != 0 || olen < AES_IV_SIZE) {
+    free(decoded);
+    mbedtls_aes_free(&aes);
+    return false;
+  }
+  
+  // Extraer IV y datos encriptados
+  unsigned char iv[AES_IV_SIZE];
+  memcpy(iv, decoded, AES_IV_SIZE);
+  
+  size_t encryptedLen = olen - AES_IV_SIZE;
+  unsigned char* encrypted = decoded + AES_IV_SIZE;
+  
+  // Configurar clave
+  ret = mbedtls_aes_setkey_dec(&aes, AES_KEY, 256);
+  if (ret != 0) {
+    free(decoded);
+    mbedtls_aes_free(&aes);
+    return false;
+  }
+  
+  // Desencriptar
+  unsigned char* decrypted = (unsigned char*)malloc(encryptedLen + 1);
+  if (!decrypted) {
+    free(decoded);
+    mbedtls_aes_free(&aes);
+    return false;
+  }
+  
+  ret = mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_DECRYPT, encryptedLen, iv, encrypted, decrypted);
+  
+  if (ret == 0) {
+    // Remover padding PKCS5
+    int padding = decrypted[encryptedLen - 1];
+    if (padding > 0 && padding <= AES_BLOCK_SIZE) {
+      encryptedLen -= padding;
+    }
+    decrypted[encryptedLen] = '\0';
+    
+    // Copiar resultado
+    strncpy(output, (char*)decrypted, outputSize - 1);
+    output[outputSize - 1] = '\0';
+  }
+  
+  free(decrypted);
+  free(decoded);
+  mbedtls_aes_free(&aes);
+  
+  return (ret == 0);
+}
+
+/**
+ * Encripta un mensaje con AES-256-CBC
+ * @param plainText Texto a encriptar
+ * @param output Buffer para almacenar el resultado en Base64
+ * @param outputSize Tamaño del buffer de salida
+ * @return true si la encriptación fue exitosa
+ */
+bool encryptResponse(const char* plainText, char* output, size_t outputSize) {
+  mbedtls_aes_context aes;
+  mbedtls_aes_init(&aes);
+  
+  size_t plainLen = strlen(plainText);
+  
+  // Calcular tamaño con padding PKCS5
+  size_t paddedLen = ((plainLen / AES_BLOCK_SIZE) + 1) * AES_BLOCK_SIZE;
+  unsigned char* padded = (unsigned char*)malloc(paddedLen);
+  if (!padded) {
+    mbedtls_aes_free(&aes);
+    return false;
+  }
+  
+  memcpy(padded, plainText, plainLen);
+  
+  // Agregar padding PKCS5
+  int padding = paddedLen - plainLen;
+  for (int i = plainLen; i < paddedLen; i++) {
+    padded[i] = padding;
+  }
+  
+  // Generar IV aleatorio
+  unsigned char iv[AES_IV_SIZE];
+  for (int i = 0; i < AES_IV_SIZE; i++) {
+    iv[i] = random(256);
+  }
+  
+  // Configurar clave
+  int ret = mbedtls_aes_setkey_enc(&aes, AES_KEY, 256);
+  if (ret != 0) {
+    free(padded);
+    mbedtls_aes_free(&aes);
+    return false;
+  }
+  
+  // Encriptar
+  unsigned char* encrypted = (unsigned char*)malloc(paddedLen);
+  if (!encrypted) {
+    free(padded);
+    mbedtls_aes_free(&aes);
+    return false;
+  }
+  
+  ret = mbedtls_aes_crypt_cbc(&aes, MBEDTLS_AES_ENCRYPT, paddedLen, iv, padded, encrypted);
+  
+  if (ret == 0) {
+    // Combinar IV + datos encriptados
+    unsigned char* combined = (unsigned char*)malloc(AES_IV_SIZE + paddedLen);
+    if (combined) {
+      memcpy(combined, iv, AES_IV_SIZE);
+      memcpy(combined + AES_IV_SIZE, encrypted, paddedLen);
+      
+      // Codificar a Base64
+      size_t olen;
+      ret = mbedtls_base64_encode((unsigned char*)output, outputSize, &olen, 
+                                   combined, AES_IV_SIZE + paddedLen);
+      output[olen] = '\0';
+      
+      free(combined);
+    } else {
+      ret = -1;
+    }
+  }
+  
+  free(encrypted);
+  free(padded);
+  mbedtls_aes_free(&aes);
+  
+  return (ret == 0);
+}
+
+/**
+ * Verifica si un string parece estar encriptado (Base64 válido)
+ */
+bool isEncrypted(const char* text) {
+  if (strlen(text) < 20) return false; // Mínimo tamaño esperado
+  
+  // Verificar que sea Base64 válido
+  for (int i = 0; text[i] != '\0'; i++) {
+    char c = text[i];
+    if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || 
+          (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Genera un UUID único basado en el chip ID y tiempo
  * @param uuid Buffer para almacenar el UUID generado
  */
@@ -293,44 +479,65 @@ void generarUUID(char* uuid) {
 
 /**
  * Procesa un comando recibido por Bluetooth
- * @param cmd Comando recibido (ya trimmeado)
+ * @param cmd Comando recibido (ya trimmeado, puede estar encriptado)
  */
 void procesarComando(String cmd) {
+  // Intentar desencriptar el comando
+  char decryptedCmd[128];
+  bool wasEncrypted = false;
+  
+  if (isEncrypted(cmd.c_str())) {
+    if (decryptCommand(cmd.c_str(), decryptedCmd, sizeof(decryptedCmd))) {
+      cmd = String(decryptedCmd);
+      wasEncrypted = true;
+      Serial.print("[AES] Comando desencriptado: ");
+      Serial.println(cmd);
+    } else {
+      Serial.println("[AES] Error desencriptando comando");
+      SerialBT.println("ERROR:DECRYPT_FAILED");
+      return;
+    }
+  }
+  
   // Convertir a mayúsculas para comparación (excepto SET_UUID que tiene datos)
   String cmdUpper = cmd;
   cmdUpper.toUpperCase();
   
   // === PING - Heartbeat ===
   if (cmdUpper == "PING") {
-    SerialBT.println("PONG");
+    sendEncryptedResponse("PONG", wasEncrypted);
     return;
   }
   
   // === STATUS - Estado actual ===
   if (cmdUpper == "STATUS") {
-    enviarEstado();
+    char statusMsg[64];
+    snprintf(statusMsg, sizeof(statusMsg), "STATUS:%s", getNombreEstado());
+    sendEncryptedResponse(statusMsg, wasEncrypted);
     return;
   }
   
   // === SILENCIAR - Silenciar alarma ===
   if (cmdUpper == "SILENCIAR") {
     silenciarAlarma();
-    SerialBT.println("OK:SILENCIADO");
+    sendEncryptedResponse("OK:SILENCIADO", wasEncrypted);
     return;
   }
   
   // === GET_UUID ===
   if (cmdUpper == "GET_UUID") {
     if (strlen(deviceUUID) > 0) {
-      SerialBT.print("UUID:");
-      SerialBT.println(deviceUUID);
+      char uuidMsg[64];
+      snprintf(uuidMsg, sizeof(uuidMsg), "UUID:%s", deviceUUID);
+      sendEncryptedResponse(uuidMsg, wasEncrypted);
     } else {
       generarUUID(deviceUUID);
       preferences.begin("pastillapp", false);
       preferences.putString(UUID_KEY, String(deviceUUID));
       preferences.end();
-      SerialBT.print("UUID:");
-      SerialBT.println(deviceUUID);
+      char uuidMsg[64];
+      snprintf(uuidMsg, sizeof(uuidMsg), "UUID:%s", deviceUUID);
+      sendEncryptedResponse(uuidMsg, wasEncrypted);
     }
     return;
   }
@@ -338,10 +545,11 @@ void procesarComando(String cmd) {
   // === SEND_UUID ===
   if (cmdUpper == "SEND_UUID") {
     if (strlen(deviceUUID) > 0) {
-      SerialBT.print("UUID:");
-      SerialBT.println(deviceUUID);
+      char uuidMsg[64];
+      snprintf(uuidMsg, sizeof(uuidMsg), "UUID:%s", deviceUUID);
+      sendEncryptedResponse(uuidMsg, wasEncrypted);
     } else {
-      SerialBT.println("NO_UUID");
+      sendEncryptedResponse("NO_UUID", wasEncrypted);
     }
     return;
   }
@@ -355,9 +563,9 @@ void procesarComando(String cmd) {
       preferences.begin("pastillapp", false);
       preferences.putString(UUID_KEY, newUUID);
       preferences.end();
-      SerialBT.println("OK:UUID_SET");
+      sendEncryptedResponse("OK:UUID_SET", wasEncrypted);
     } else {
-      SerialBT.println("ERROR:INVALID_UUID");
+      sendEncryptedResponse("ERROR:INVALID_UUID", wasEncrypted);
     }
     return;
   }
@@ -366,16 +574,39 @@ void procesarComando(String cmd) {
   if (cmdUpper == "PASTILLA") {
     if (estado == CERRADO) {
       iniciarAbierto();
-      SerialBT.println("OK:ABRIENDO");
+      sendEncryptedResponse("OK:ABRIENDO", wasEncrypted);
     } else {
-      SerialBT.println("WARN:YA_ABIERTO");
+      sendEncryptedResponse("WARN:YA_ABIERTO", wasEncrypted);
     }
     return;
   }
   
   // Comando no reconocido
-  SerialBT.print("ERROR:COMANDO_DESCONOCIDO:");
-  SerialBT.println(cmd);
+  char errorMsg[128];
+  snprintf(errorMsg, sizeof(errorMsg), "ERROR:COMANDO_DESCONOCIDO:%s", cmd.c_str());
+  sendEncryptedResponse(errorMsg, wasEncrypted);
+}
+
+/**
+ * Envía una respuesta encriptada o en texto plano según corresponda
+ * @param response Texto de respuesta
+ * @param encrypt true si debe encriptarse (cuando el comando recibido estaba encriptado)
+ */
+void sendEncryptedResponse(const char* response, bool encrypt) {
+  if (!SerialBT.hasClient()) return;
+  
+  if (encrypt) {
+    char encrypted[256];
+    if (encryptResponse(response, encrypted, sizeof(encrypted))) {
+      SerialBT.println(encrypted);
+    } else {
+      Serial.println("[AES] Error encriptando respuesta");
+      SerialBT.println("ERROR:ENCRYPT_FAILED");
+    }
+  } else {
+    // Enviar en texto plano (compatibilidad hacia atrás)
+    SerialBT.println(response);
+  }
 }
 
 // ============================================================================

@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothDevice.BOND_BONDED
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -165,15 +166,24 @@ class BluetoothConnectionService : Service() {
 
     /**
      * Envía un comando al dispositivo ESP32
+     * El comando se encripta con AES antes de enviarlo
      */
     fun sendCommand(command: String) {
         if (isConnected) {
             serviceScope.launch {
                 try {
-                    val commandBytes = "$command\n".toByteArray()
+                    // Encriptar comando antes de enviar
+                    val encryptedCommand = BluetoothEncryption.encrypt(command)
+                    if (encryptedCommand == null) {
+                        Log.e(TAG, "Error encriptando comando: $command")
+                        return@launch
+                    }
+                    
+                    // Enviar comando encriptado (terminado con \n)
+                    val commandBytes = "$encryptedCommand\n".toByteArray()
                     outputStream?.write(commandBytes)
                     outputStream?.flush()
-                    Log.d(TAG, "Comando enviado: $command")
+                    Log.d(TAG, "Comando encriptado enviado: ${command.take(20)}...")
                 } catch (e: IOException) {
                     Log.e(TAG, "Error enviando comando", e)
                     handleConnectionLost()
@@ -235,6 +245,36 @@ class BluetoothConnectionService : Service() {
                         continue
                     }
                     
+                    // Verificación de bonding (requisito de seguridad)
+                    val bondState = device?.bondState
+                    if (bondState != BOND_BONDED) {
+                        Log.w(TAG, "Dispositivo no está vinculado (bonded). Estado: $bondState")
+                        Log.w(TAG, "Iniciando proceso de vinculación...")
+                        
+                        // Intentar crear bond
+                        val bondResult = device?.createBond()
+                        if (bondResult == true) {
+                            // Esperar a que se complete el bonding
+                            var bondWaitCount = 0
+                            while (device?.bondState != BOND_BONDED && bondWaitCount < 30) {
+                                delay(500)
+                                bondWaitCount++
+                            }
+                            
+                            if (device?.bondState != BOND_BONDED) {
+                                Log.e(TAG, "No se pudo establecer bonding. Rechazando conexión.")
+                                delay(reconnectDelay)
+                                continue
+                            }
+                            Log.d(TAG, "Bonding completado exitosamente")
+                        } else {
+                            Log.e(TAG, "No se pudo iniciar el proceso de bonding")
+                            delay(reconnectDelay)
+                            continue
+                        }
+                    }
+                    
+                    Log.d(TAG, "Dispositivo está vinculado, procediendo con conexión")
                     socket = device?.createRfcommSocketToServiceRecord(SPP_UUID)
                     socket?.connect()
                     
@@ -317,9 +357,15 @@ class BluetoothConnectionService : Service() {
                 delay(HEARTBEAT_INTERVAL)
                 if (isConnected) {
                     try {
-                        outputStream?.write("PING\n".toByteArray())
-                        outputStream?.flush()
-                        Log.d(TAG, "Heartbeat enviado")
+                        // Encriptar PING antes de enviar
+                        val encryptedPing = BluetoothEncryption.encrypt("PING")
+                        if (encryptedPing != null) {
+                            outputStream?.write("$encryptedPing\n".toByteArray())
+                            outputStream?.flush()
+                            Log.d(TAG, "Heartbeat encriptado enviado")
+                        } else {
+                            Log.e(TAG, "Error encriptando heartbeat")
+                        }
                     } catch (e: IOException) {
                         Log.e(TAG, "Error en heartbeat", e)
                         handleConnectionLost()
@@ -331,42 +377,55 @@ class BluetoothConnectionService : Service() {
     }
 
     private fun processReceivedData(data: String) {
-        Log.d(TAG, "Datos recibidos: $data")
+        Log.d(TAG, "Datos recibidos (raw): $data")
+        
+        // Intentar desencriptar el mensaje
+        var decryptedData = data
+        if (BluetoothEncryption.isEncrypted(data)) {
+            val decrypted = BluetoothEncryption.decrypt(data)
+            if (decrypted != null) {
+                decryptedData = decrypted
+                Log.d(TAG, "Datos desencriptados: $decryptedData")
+            } else {
+                Log.w(TAG, "No se pudo desencriptar, procesando como texto plano")
+                // Intentar procesar como texto plano (compatibilidad hacia atrás)
+            }
+        }
         
         when {
             // Eventos
-            data.startsWith("EVENT:") -> {
-                val event = data.substringAfter("EVENT:")
+            decryptedData.startsWith("EVENT:") -> {
+                val event = decryptedData.substringAfter("EVENT:")
                 notifyEvent(event)
             }
             
             // Estado del dispositivo
-            data.startsWith("STATUS:") -> {
-                currentDeviceStatus = data.substringAfter("STATUS:")
+            decryptedData.startsWith("STATUS:") -> {
+                currentDeviceStatus = decryptedData.substringAfter("STATUS:")
                 notifyDeviceStatus(currentDeviceStatus)
             }
             
             // Valor LDR
-            data.startsWith("LDR=") -> {
-                val ldrStr = data.substringAfter("LDR=")
+            decryptedData.startsWith("LDR=") -> {
+                val ldrStr = decryptedData.substringAfter("LDR=")
                 currentLdrValue = ldrStr.toIntOrNull() ?: 0
                 notifyLdrValue(currentLdrValue)
             }
             
             // UUID
-            data.startsWith("UUID:") -> {
-                val uuid = data.substringAfter("UUID:")
+            decryptedData.startsWith("UUID:") -> {
+                val uuid = decryptedData.substringAfter("UUID:")
                 notifyDataReceived("UUID", uuid)
             }
             
             // PONG (heartbeat response)
-            data == "PONG" -> {
+            decryptedData == "PONG" -> {
                 Log.d(TAG, "Heartbeat OK")
             }
             
             // Otros mensajes
             else -> {
-                notifyDataReceived("MESSAGE", data)
+                notifyDataReceived("MESSAGE", decryptedData)
             }
         }
     }

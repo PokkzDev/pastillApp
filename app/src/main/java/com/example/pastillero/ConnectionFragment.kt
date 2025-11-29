@@ -394,6 +394,17 @@ class ConnectionFragment : Fragment() {
             try {
                 progressDialog.show()
                 
+                // Verificación de seguridad: el dispositivo debe estar vinculado (bonded)
+                if (device.bondState != BluetoothDevice.BOND_BONDED) {
+                    progressDialog.dismiss()
+                    Toast.makeText(
+                        requireContext(),
+                        "Error de seguridad: El dispositivo debe estar emparejado antes de conectar",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+                
                 // Obtener UID de enfermera (requerido por las reglas de Firestore)
                 val enfermeraUid = FirebaseAuthClient.auth.currentUser?.uid
                 if (enfermeraUid == null) {
