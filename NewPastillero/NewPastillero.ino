@@ -207,6 +207,8 @@ void iniciarAbierto() {
   cambioDetectado = false;
   tInicioCambio = 0;
   baselineLDR = leerLDRPromedio();
+  Serial.print("[LDR] Baseline inicial establecido: ");
+  Serial.println(baselineLDR, 1);
   
   // Notificar evento
   notificacionAbierto = true;
@@ -380,6 +382,9 @@ void procesarComando(String cmd) {
 // SETUP
 // ============================================================================
 void setup() {
+  // Serial Monitor
+  Serial.begin(115200);
+  
   // Bluetooth
   SerialBT.begin("PastillApp V1");
   
@@ -414,6 +419,8 @@ void setup() {
   digitalWrite(PIN_LED, LOW);
   estado = CERRADO;
   anguloActual = ANGULO_CERRADO;
+  
+  Serial.println("PastillApp iniciado - Monitor Serial activo");
 }
 
 // ============================================================================
@@ -460,6 +467,12 @@ void loop() {
       if (now - tTelemetriaLDR >= INTERVALO_TELEMETRIA_LDR) {
         tTelemetriaLDR = now;
         int lecturaInst = leerLDRPromedio();
+        Serial.print("[LDR] Lectura: ");
+        Serial.print(lecturaInst);
+        Serial.print(" | Baseline: ");
+        Serial.print(baselineLDR, 1);
+        Serial.print(" | Estado: ABIERTO");
+        Serial.println();
         if (SerialBT.hasClient()) {
           SerialBT.print("LDR=");
           SerialBT.println(lecturaInst);
@@ -484,13 +497,42 @@ void loop() {
 
         bool umbralSuperado = (deltaRel >= UMBRAL_RELATIVO) || (absDelta >= (float)UMBRAL_ABS);
 
+        // Output serial para debugging
+        static unsigned long tUltimoDebug = 0;
+        if (now - tUltimoDebug >= 200) { // Cada 200ms para no saturar
+          tUltimoDebug = now;
+          Serial.print("[LDR] Lectura: ");
+          Serial.print(lectura);
+          Serial.print(" | Baseline: ");
+          Serial.print(baselineLDR, 1);
+          Serial.print(" | Delta: ");
+          Serial.print(absDelta, 1);
+          Serial.print(" | DeltaRel: ");
+          Serial.print(deltaRel * 100, 1);
+          Serial.print("% | Umbral: ");
+          Serial.print(umbralSuperado ? "SI" : "NO");
+          if (tInicioCambio > 0) {
+            Serial.print(" | Confirmando: ");
+            Serial.print(now - tInicioCambio);
+            Serial.print("ms");
+          }
+          Serial.println();
+        }
+
         if (umbralSuperado) {
-          if (tInicioCambio == 0) tInicioCambio = now;
+          if (tInicioCambio == 0) {
+            tInicioCambio = now;
+            Serial.println("[LDR] Cambio detectado - Iniciando confirmación...");
+          }
           if (now - tInicioCambio >= T_CONFIRMACION) {
             cambioDetectado = true;
+            Serial.println("[LDR] ¡MANO DETECTADA! - Iniciando cuenta regresiva");
             iniciarCuentaRegresiva();
           }
         } else {
+          if (tInicioCambio > 0) {
+            Serial.println("[LDR] Cambio no confirmado - Reset");
+          }
           tInicioCambio = 0;
         }
       }
@@ -506,6 +548,12 @@ void loop() {
       if (now - tTelemetriaLDR >= INTERVALO_TELEMETRIA_LDR) {
         tTelemetriaLDR = now;
         int lecturaInst = leerLDRPromedio();
+        Serial.print("[LDR] Lectura: ");
+        Serial.print(lecturaInst);
+        Serial.print(" | Baseline: ");
+        Serial.print(baselineLDR, 1);
+        Serial.print(" | Estado: CUENTA_REGRESIVA");
+        Serial.println();
         if (SerialBT.hasClient()) {
           SerialBT.print("LDR=");
           SerialBT.println(lecturaInst);
