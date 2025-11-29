@@ -1,32 +1,21 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("com.google.gms.google-services")
 }
 
 android {
-    namespace = "com.example.pastillero"
-    compileSdk {
-        version = release(36)
-    }
+    namespace = "com.pokkzdev.pastillapp"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.pastillero"
+        applicationId = "com.pokkzdev.pastillapp"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        
-        // Load Supabase credentials from local.properties
-        val properties = org.jetbrains.kotlin.konan.properties.Properties()
-        val localPropertiesFile = rootProject.file("local.properties")
-        if (localPropertiesFile.exists()) {
-            properties.load(localPropertiesFile.inputStream())
-        }
-        
-        buildConfigField("String", "SUPABASE_URL", "\"${properties.getProperty("supabase.url", "")}\"")
-        buildConfigField("String", "SUPABASE_KEY", "\"${properties.getProperty("supabase.key", "")}\"")
     }
 
     buildTypes {
@@ -62,8 +51,12 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
-    implementation("io.github.jan-tennert.supabase:gotrue-kt:2.5.1")
-    implementation("io.github.jan-tennert.supabase:postgrest-kt:2.5.1")
-    implementation("io.github.jan-tennert.supabase:realtime-kt:2.5.1")
-    implementation("io.ktor:ktor-client-cio:2.3.11")
+    
+    // Firebase
+    implementation(platform(libs.firebaseBom))
+    implementation(libs.firebaseAuthKtx)
+    implementation(libs.firebaseFirestoreKtx)
+    
+    // Coroutines for Firebase
+    implementation(libs.kotlinxCoroutinesPlayServices)
 }

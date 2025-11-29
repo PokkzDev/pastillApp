@@ -25,9 +25,14 @@
     <string name="device_not_connected">Dispositivo no conectado</string>
     <string name="connect_device_message">Conecta tu PastillApp para controlar el dispositivo</string>
     <string name="compartment_opened">Compartimento abierto</string>
+    <string name="compartment_closed">Compartimento cerrado</string>
+    <string name="pill_taken">Pastilla retirada</string>
     <string name="alarm_silenced">Alarma silenciada</string>
     <string name="error_opening_compartment">Error al abrir compartimento</string>
     <string name="error_silencing_alarm">Error al silenciar alarma</string>
+    <string name="bluetooth_service_running">Servicio Bluetooth activo</string>
+    <string name="connecting_to_device">Conectando al dispositivo...</string>
+    <string name="reconnecting">Reconectando...</string>
 
     <!-- Connection Screen-->
     <string name="connection_title">Conexión</string>
@@ -46,6 +51,7 @@
     <string name="find_devices_button">Buscar Dispositivos</string>
     <string name="searching_devices">Buscando dispositivos...</string>
     <string name="no_devices_found">No se encontraron dispositivos</string>
+    <string name="bluetooth_not_available">Bluetooth no disponible</string>
     <string name="bluetooth_disabled">Bluetooth desactivado</string>
     <string name="enable_bluetooth">Activar Bluetooth</string>
     <string name="connection_instructions">Asegúrate de que tu dispositivo PastillApp esté encendido y el Bluetooth activado</string>
@@ -75,6 +81,10 @@
     <!-- Account Screen -->
     <string name="account_title">Cuenta</string>
     <string name="account_button">Cerrar Sesión</string>
+    <string name="account_header_title">Mi Cuenta</string>
+    <string name="account_header_subtitle">Gestiona tu información y configuración</string>
+    <string name="account_user_info_title">Información del Usuario</string>
+    <string name="account_email_label">Correo Electrónico</string>
 
     
     <!-- Login error messages -->
@@ -129,4 +139,18 @@
     <string name="error_empty_amount">Debe ingresar la cantidad</string>
     <string name="event_added_success">Medicamento agregado correctamente</string>
     <string name="event_deleted_success">Medicamento eliminado</string>
+    <string name="error_loading_events">Error al cargar eventos</string>
+    <string name="error_not_logged_in">Debe iniciar sesión para agregar eventos</string>
+    <string name="error_adding_event">Error al agregar medicamento</string>
+    <string name="error_deleting_event">Error al eliminar medicamento</string>
+    
+    <!-- Date Picker -->
+    <string name="prev_day_description">Día anterior</string>
+    <string name="next_day_description">Día siguiente</string>
+    <string name="tap_to_change_date">Toca para cambiar fecha</string>
+    <string name="go_to_today">Ir a hoy</string>
+    
+    <!-- Event Item -->
+    <string name="time_label_hrs">hrs</string>
+    <string name="no_time_set">Sin hora</string>
 </resources>

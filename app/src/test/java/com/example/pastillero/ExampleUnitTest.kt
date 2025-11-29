@@ -1,4 +1,4 @@
-package com.example.pastillero
+package com.pokkzdev.pastillapp
 
 import org.junit.Test
 

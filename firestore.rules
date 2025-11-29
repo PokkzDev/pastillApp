@@ -1,0 +1,60 @@
+rules_version = '2';
+
+service cloud.firestore {
+
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to get current user ID
+    function getUserId() {
+      return request.auth.uid;
+    }
+
+    // Pill Events Collection
+    // Users can only read/write their own pill events
+    match /pillEvents/{eventId} {
+      // For single document reads (get)
+      allow get: if isAuthenticated() && resource.data.userId == getUserId();
+      // For queries (list) - allow if authenticated
+      allow list: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == getUserId();
+      allow update: if isAuthenticated() && resource.data.userId == getUserId() && request.resource.data.userId == getUserId();
+      allow delete: if isAuthenticated() && resource.data.userId == getUserId();
+    }
+
+    // Devices Collection
+    // Users can read/write devices where they are the enfermeraUid
+    match /devices/{deviceId} {
+      // Allow authenticated users to check if a device exists (needed before registration)
+      // Only returns data if document exists; safe since data is not sensitive
+      allow get: if isAuthenticated();
+      allow list: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.enfermeraUid == getUserId();
+      allow update: if isAuthenticated() && resource.data.enfermeraUid == getUserId() && request.resource.data.enfermeraUid == getUserId();
+      allow delete: if isAuthenticated() && resource.data.enfermeraUid == getUserId();
+    }
+
+    // Patients Collection (for future use)
+    match /patients/{patientId} {
+      allow get: if isAuthenticated() && resource.data.enfermeraUid == getUserId();
+      allow list: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.enfermeraUid == getUserId();
+      allow update: if isAuthenticated() && resource.data.enfermeraUid == getUserId();
+      allow delete: if isAuthenticated() && resource.data.enfermeraUid == getUserId();
+
+      // Schedules subcollection
+      match /schedules/{scheduleId} {
+        allow read, write: if isAuthenticated() && get(/databases/$(database)/documents/patients/$(patientId)).data.enfermeraUid == getUserId();
+      }
+
+      // Intakes subcollection
+      match /intakes/{intakeId} {
+        allow read, write: if isAuthenticated() && get(/databases/$(database)/documents/patients/$(patientId)).data.enfermeraUid == getUserId();
+      }
+    }
+  }
+}

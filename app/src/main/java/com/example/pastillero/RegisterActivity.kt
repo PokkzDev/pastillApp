@@ -1,4 +1,4 @@
-package com.example.pastillero
+package com.pokkzdev.pastillapp
 
 import android.content.Intent
 import android.os.Bundle
@@ -10,8 +10,8 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
-import io.github.jan.supabase.gotrue.auth
-import io.github.jan.supabase.gotrue.providers.builtin.Email
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.launch
 
 class RegisterActivity : AppCompatActivity() {
@@ -85,19 +85,22 @@ class RegisterActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            // Register user with Supabase
+            // Register user with Firebase
             lifecycleScope.launch {
                 try {
-                    SupabaseClient.client.auth.signUpWith(Email) {
-                        this.email = email
-                        this.password = password
-                    }
+                    val auth = FirebaseAuthClient.auth
+                    val result = auth.createUserWithEmailAndPassword(email, password).await()
+                    val user = result.user
+                    
+                    // Start session after successful registration
+                    SessionManager.init(this@RegisterActivity)
+                    SessionManager.updateLastActivity()
                     
                     Snackbar.make(view, getString(R.string.register_success), Snackbar.LENGTH_LONG).show()
                     
                     // Navigate to MainActivity
                     val intent = Intent(this@RegisterActivity, MainActivity::class.java)
-                    intent.putExtra("USER_EMAIL", email)
+                    intent.putExtra("USER_EMAIL", user?.email ?: email)
                     startActivity(intent)
                     finish()
                     

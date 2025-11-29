@@ -1,4 +1,4 @@
-package com.example.pastillero
+package com.pokkzdev.pastillapp
 
 import android.Manifest
 import android.bluetooth.BluetoothDevice

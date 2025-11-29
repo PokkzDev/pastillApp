@@ -1,4 +1,4 @@
-package com.example.pastillero
+package com.pokkzdev.pastillapp
 
 import java.text.SimpleDateFormat
 import java.util.*

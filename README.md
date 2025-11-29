@@ -1,75 +1,147 @@
-# PastillApp
+# PastillApp – Firestore & Auth Data Model (Prototipo)
 
-PastillApp es una aplicación para Android diseñada para ayudar a los usuarios a gestionar su medicación, con un pastillero inteligente.
+Este proyecto es un prototipo de sistema compuesto por:
 
-## Funcionalidades
+- **App Android (Enfermera)**
+- **Dispositivo físico PastillApp (ESP32 Devkit1, pastillero)**
+- **Firebase Auth (login enfermera)**
+- **Cloud Firestore (datos mínimos)**
 
-*   **Autenticación de usuarios:**
-    *   Inicio de sesión y registro de usuarios utilizando Supabase.
-    *   Validación de campos de correo y contraseña.
+**Objetivo:** permitir que una enfermera:
 
-*   **Navegación principal:**
-    *   Una barra de navegación inferior para cambiar entre las pantallas principales: Inicio, Calendario, Conexión y Cuenta.
+- Registre un dispositivo PastillApp (ESP32) y le asigne un UUID.
+- Asigne ese dispositivo a un paciente.
+- Configure horarios de medicación.
+- Registre si una toma fue realizada o no.
 
-*   **Pantalla de Inicio:**
-    *   Muestra información relevante sobre los medicamentos del usuario.
+La estructura debe ser simple, legible y fácil de defender.
 
-*   **Pantalla de Calendario:**
-    *   Permite a los usuarios ver su horario de medicación.
-    *   Opción para añadir nuevos eventos/recordatorios de medicación.
+Firestore es schema-less, pero este archivo define el contrato que el código debe respetar.
 
-*   **Pantalla de Conexión:**
-    *   Busca y se conecta a pastilleros inteligentes mediante Bluetooth.
-    *   Muestra el estado de la conexión.
-    *   Guarda el dispositivo conectado para futuras sesiones.
+## 1. Resumen de colecciones
 
-*   **Pantalla de Cuenta:**
-    *   Muestra el correo electrónico del usuario.
-    *   Permite al usuario cerrar la sesión.
+Colecciones y subcolecciones usadas:
 
-## Tecnologías Integradas
+- `patients` – Pacientes gestionados por la enfermera.
+- `devices` – Dispositivos físicos PastillApp (ESP32) registrados.
+- `patients/{patientId}/schedules` – Horarios configurados para un paciente.
+- `patients/{patientId}/intakes` – Registro de tomas realizadas / no realizadas.
 
-*   **Kotlin:** Como lenguaje de programación principal.
-*   **Supabase:** Utilizado como backend para la autenticación de usuarios y la gestión de la base de datos.
-*   **Android SDK:**
-    *   **Fragments:** Para construir una interfaz de usuario modular.
-    *   **Bluetooth:** Para la comunicación con el pastillero inteligente.
+**Autenticación:**
 
-## Cómo Empezar
+Se usa Firebase Auth.
 
-1.  **Clonar el repositorio:**
-    ```bash
-    git clone https://github.com/tu-usuario/PastillApp.git
-    ```
+El `uid` del usuario autenticado representa a la enfermera o usuario que realiza acciones.
 
-2.  **Abrir en Android Studio:**
-    *   Abre Android Studio y selecciona `Open an existing project`.
-    *   Navega hasta el directorio del proyecto clonado y ábrelo.
+## 2. Colección patients
 
-3.  **Configurar Supabase:**
-    *   Necesitarás un `SUPABASE_URL` y un `SUPABASE_ANON_KEY`.
-    *   Crea un archivo `SupabaseClient.kt` en `app/src/main/java/com/example/pastillero/` y añade tus credenciales:
+**Ruta:** `patients/{patientId}`
 
-    ```kotlin
-    package com.example.pastillero
+`patientId` es un ID generado por Firestore (o por la app).
 
-    import io.github.jan.supabase.SupabaseClient
-    import io.github.jan.supabase.createSupabaseClient
-    import io.github.jan.supabase.gotrue.GoTrue
+**Campos:**
 
-    object SupabaseClient {
-        val client: SupabaseClient = createSupabaseClient(
-            supabaseUrl = "TU_URL_DE_SUPABASE",
-            supabaseKey = "TU_LLAVE_ANONIMA_DE_SUPABASE"
-        ) {
-            install(GoTrue)
-        }
-    }
-    ```
+```json
+{
+  "nombre": "string",              // Nombre del paciente
+  "rut": "string",                 // Opcional para prototipo
+  "enfermeraUid": "string",        // uid de Firebase Auth del responsable
+  "deviceId": "string|null",       // UUID del dispositivo PastillApp asignado (1 a 1 en el prototipo)
+  "creadoEn": "timestamp"          // FieldValue.serverTimestamp()
+}
+```
 
-4.  **Ejecutar la aplicación:**
-    *   Selecciona un emulador o un dispositivo físico y haz clic en el botón `Run`.
+**Reglas para la IA/código:**
 
-## Licencia
+- Filtrar pacientes por `enfermeraUid` para mostrar solo los del usuario logueado.
+- Inicialmente `deviceId` puede ser `null`; se setea cuando se registra el dispositivo.
 
-Este proyecto está licenciado bajo la Licencia MIT. Consulta el archivo `LICENSE` para más detalles.
+## 3. Colección devices
+
+Representa el pastillero físico (ESP32) registrado.
+
+**Ruta:** `devices/{deviceId}`
+
+`deviceId` = UUID generado por la app y enviado al ESP32.
+
+El ESP32 guarda ese UUID localmente (NVS/EEPROM).
+
+**Campos:**
+
+```json
+{
+  "patientId": "string",        // Id del paciente al que está asociado
+  "enfermeraUid": "string",     // uid de quien lo registró
+  "macAddress": "string",       // MAC Bluetooth del ESP32 (opcional pero recomendado)
+  "creadoEn": "timestamp"       // FieldValue.serverTimestamp()
+}
+```
+
+**Flujo esperado:**
+
+1. App genera UUID.
+2. App envía UUID al ESP32 vía Bluetooth.
+3. Si ESP32 responde OK:
+   - Crear doc en `devices/{UUID}`.
+   - Actualizar `patients/{patientId}.deviceId = UUID`.
+
+## 4. Subcolección schedules (Horarios por paciente)
+
+Horarios simples para el prototipo (1 horario = 1 hora fija diaria).
+
+**Ruta:** `patients/{patientId}/schedules/{scheduleId}`
+
+**Campos:**
+
+```json
+{
+  "deviceId": "string",         // UUID del dispositivo asignado
+  "medicamento": "string",      // Ej: "Paracetamol 500mg"
+  "dosis": 1,                   // número de pastillas/unidades
+  "hora": "string",             // Ej: "08:00" (HH:mm)
+  "activo": true,               // Permite habilitar/deshabilitar
+  "creadoEn": "timestamp"
+}
+```
+
+**Reglas:**
+
+- Para varias tomas al día → crear varios documentos (ej: 08:00 y 20:00).
+- La app puede leer estos horarios y enviarlos al ESP32 vía Bluetooth.
+
+## 5. Subcolección intakes (Registro de tomas)
+
+Registra el resultado de cada toma programada: tomada o no tomada.
+
+**Ruta:** `patients/{patientId}/intakes/{intakeId}`
+
+**Campos:**
+
+```json
+{
+  "scheduleId": "string",         // Id del horario asociado
+  "deviceId": "string",           // UUID del dispositivo PastillApp
+  "fechaProgramada": "timestamp", // Día y hora que correspondía la toma
+  "tomado": true,                 // true = se tomó, false = no
+  "registradoPorUid": "string",   // uid de quien registra (app/enfermera)
+  "registradoEn": "timestamp"     // Momento en que se guarda el registro
+}
+```
+
+**Posible comportamiento:**
+
+- Cuando el ESP32 + app detectan retiro (LDR / confirmación):
+  - Crear doc con `tomado: true`.
+- Si se deja pasar el tiempo sin detección:
+  - Crear doc con `tomado: false` (manual o automático).
+
+## 6. Notas para la IA del IDE
+
+- No crear "schemas" en Firestore, solo usar estas rutas y campos al leer/escribir.
+- Siempre usar `FirebaseAuth.getInstance().currentUser?.uid` para `enfermeraUid` y `registradoPorUid`.
+- Mantener 1:1 `patient ↔ device` en este prototipo para simplificar.
+- Subcolecciones dependen del `patientId`:
+  - Nunca crear `schedules` o `intakes` sueltos fuera de `patients/{patientId}`.
+- Usar `FieldValue.serverTimestamp()` para `creadoEn` y `registradoEn` cuando sea posible.
+
+Con esto la IA de tu IDE ya tiene el mapa completo para generar código coherente con tu prototipo PastillApp.

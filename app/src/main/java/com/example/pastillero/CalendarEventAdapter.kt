@@ -1,13 +1,12 @@
-package com.example.pastillero
+package com.pokkzdev.pastillapp
 
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
-import java.text.SimpleDateFormat
-import java.util.Locale
 
 /**
  * Adapter for displaying pill events in a RecyclerView
@@ -17,12 +16,11 @@ class CalendarEventAdapter(
     private val onDeleteClick: (PillEvent) -> Unit
 ) : RecyclerView.Adapter<CalendarEventAdapter.EventViewHolder>() {
 
-    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-
     class EventViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val timeBadge: LinearLayout = view.findViewById(R.id.timeBadge)
+        val timeText: TextView = view.findViewById(R.id.timeText)
         val pillNameText: TextView = view.findViewById(R.id.pillNameText)
         val amountText: TextView = view.findViewById(R.id.amountText)
-        val timeText: TextView = view.findViewById(R.id.timeText)
         val deleteButton: ImageButton = view.findViewById(R.id.deleteButton)
     }
 
@@ -34,16 +32,25 @@ class CalendarEventAdapter(
 
     override fun onBindViewHolder(holder: EventViewHolder, position: Int) {
         val event = events[position]
-        holder.pillNameText.text = event.pillName
+        val context = holder.itemView.context
+        
+        // Set pill name (capitalize first letter)
+        holder.pillNameText.text = event.pillName.replaceFirstChar { it.uppercase() }
+        
+        // Set amount/dosage
         holder.amountText.text = event.amount
         
+        // Handle time display
         if (event.time.isNotEmpty()) {
+            holder.timeBadge.visibility = View.VISIBLE
             holder.timeText.text = event.time
-            holder.timeText.visibility = View.VISIBLE
         } else {
-            holder.timeText.visibility = View.GONE
+            // Show "Sin hora" when no time is set
+            holder.timeBadge.visibility = View.VISIBLE
+            holder.timeText.text = context.getString(R.string.no_time_set)
         }
         
+        // Delete button
         holder.deleteButton.setOnClickListener {
             onDeleteClick(event)
         }

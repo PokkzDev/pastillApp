@@ -1,4 +1,4 @@
-package com.example.pastillero
+package com.pokkzdev.pastillapp
 
 import android.os.Bundle
 import androidx.fragment.app.Fragment
