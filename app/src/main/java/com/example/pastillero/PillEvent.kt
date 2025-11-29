@@ -9,11 +9,13 @@ import java.util.Date
  * @property pillName Name of the pill/medication
  * @property amount Quantity/dosage of the pill
  * @property time Optional time string for when to take the pill
+ * @property dispensed Whether the pill has been dispensed by the ESP32
  */
 data class PillEvent(
     val id: String = java.util.UUID.randomUUID().toString(),
     val date: Date,
     val pillName: String,
     val amount: String,
-    val time: String = ""
+    val time: String = "",
+    val dispensed: Boolean = false
 )

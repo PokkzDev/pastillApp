@@ -151,6 +151,16 @@ class MainActivity : AppCompatActivity() {
         FirebaseAuthClient.auth.signOut()
         SelectedDevice.device = null
         
+        // Stop pill dispensing service
+        val stopIntent = Intent(this, PillDispensingService::class.java).apply {
+            action = PillDispensingService.ACTION_STOP
+        }
+        try {
+            startService(stopIntent)
+        } catch (e: Exception) {
+            // Service may not be running
+        }
+        
         val intent = Intent(this, LoginActivity::class.java)
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         startActivity(intent)

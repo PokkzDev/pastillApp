@@ -47,6 +47,10 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
     private var bluetoothService: BluetoothConnectionService? = null
     private var isBound = false
     
+    // Pill dispensing service
+    private var pillDispensingService: PillDispensingService? = null
+    private var isPillServiceBound = false
+    
     private val bluetoothViewModel: BluetoothViewModel by activityViewModels()
 
     private val serviceConnection = object : ServiceConnection {
@@ -59,8 +63,13 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
             // Update UI with current state
             updateConnectionUI(bluetoothService?.isConnected() == true)
             if (bluetoothService?.isConnected() == true) {
-                updateDeviceStatus(bluetoothService?.getCurrentDeviceStatus() ?: "DESCONOCIDO")
+                val currentStatus = bluetoothService?.getCurrentDeviceStatus() ?: "DESCONOCIDO"
+                updateDeviceStatus(currentStatus)
                 updateLdrValue(bluetoothService?.getCurrentLdrValue() ?: 0)
+                // Request current status from ESP32 to ensure we have the latest state
+                bluetoothService?.sendCommand("STATUS")
+                // Start pill dispensing service when Bluetooth is connected
+                startPillDispensingService()
             }
         }
 
@@ -68,6 +77,23 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
             bluetoothService?.removeConnectionListener(this@HomeFragment)
             bluetoothService = null
             isBound = false
+            // Stop pill dispensing service when Bluetooth disconnects
+            stopPillDispensingService()
+        }
+    }
+    
+    private val pillDispensingServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as PillDispensingService.LocalBinder
+            pillDispensingService = binder.getService()
+            pillDispensingService?.setBluetoothService(bluetoothService)
+            isPillServiceBound = true
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            pillDispensingService?.setBluetoothService(null)
+            pillDispensingService = null
+            isPillServiceBound = false
         }
     }
 
@@ -114,11 +140,14 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
     override fun onPause() {
         super.onPause()
         unbindFromService()
+        unbindFromPillDispensingService()
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
         unbindFromService()
+        unbindFromPillDispensingService()
+        stopPillDispensingService()
         clearViews()
     }
 
@@ -288,7 +317,17 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
     private fun updateDeviceStatus(status: String) {
         if (!isAdded || view == null) return
         
-        deviceStatusTextView?.text = status
+        // Display the actual status from ESP32
+        // Status values: "CERRADO", "ABIERTO", "CUENTA_REGRESIVA", or "DESCONOCIDO"
+        val displayStatus = when (status) {
+            "CERRADO" -> "Cerrado"
+            "ABIERTO" -> "Abierto"
+            "CUENTA_REGRESIVA" -> "Cerrando..."
+            "DESCONOCIDO" -> "--"
+            else -> status
+        }
+        
+        deviceStatusTextView?.text = displayStatus
         
         // Update alarm status based on device state
         when (status) {
@@ -361,11 +400,85 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
         }
     }
 
+    private fun startPillDispensingService() {
+        // Check if user is logged in
+        val auth = FirebaseAuthClient.auth
+        if (auth.currentUser == null) {
+            return
+        }
+        
+        val intent = Intent(requireContext(), PillDispensingService::class.java).apply {
+            action = PillDispensingService.ACTION_START
+        }
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                requireContext().startForegroundService(intent)
+            } else {
+                requireContext().startService(intent)
+            }
+            bindToPillDispensingService()
+        } catch (e: Exception) {
+            android.util.Log.e("HomeFragment", "Error starting PillDispensingService", e)
+        }
+    }
+    
+    private fun stopPillDispensingService() {
+        val intent = Intent(requireContext(), PillDispensingService::class.java).apply {
+            action = PillDispensingService.ACTION_STOP
+        }
+        
+        try {
+            requireContext().startService(intent)
+        } catch (e: Exception) {
+            android.util.Log.e("HomeFragment", "Error stopping PillDispensingService", e)
+        }
+    }
+    
+    private fun bindToPillDispensingService() {
+        if (!isPillServiceBound) {
+            val intent = Intent(requireContext(), PillDispensingService::class.java)
+            try {
+                requireContext().bindService(intent, pillDispensingServiceConnection, Context.BIND_AUTO_CREATE)
+            } catch (e: Exception) {
+                // Service not available yet
+            }
+        }
+    }
+    
+    private fun unbindFromPillDispensingService() {
+        if (isPillServiceBound) {
+            pillDispensingService?.setBluetoothService(null)
+            try {
+                requireContext().unbindService(pillDispensingServiceConnection)
+            } catch (e: Exception) {
+                // Already unbound
+            }
+            isPillServiceBound = false
+        }
+    }
+
     // BluetoothConnectionListener implementation
     override fun onConnectionStateChanged(isConnected: Boolean) {
         activity?.runOnUiThread {
             updateConnectionUI(isConnected)
             bluetoothViewModel.setConnected(isConnected)
+            
+            // Start/stop pill dispensing service based on connection state
+            if (isConnected) {
+                // Request current status from ESP32 to get the latest state
+                bluetoothService?.sendCommand("STATUS")
+                // Update UI with current status
+                val currentStatus = bluetoothService?.getCurrentDeviceStatus() ?: "DESCONOCIDO"
+                updateDeviceStatus(currentStatus)
+                startPillDispensingService()
+                // Update Bluetooth service reference in pill dispensing service
+                pillDispensingService?.setBluetoothService(bluetoothService)
+            } else {
+                stopPillDispensingService()
+                // Clear status when disconnected
+                updateDeviceStatus("--")
+            }
         }
     }
 

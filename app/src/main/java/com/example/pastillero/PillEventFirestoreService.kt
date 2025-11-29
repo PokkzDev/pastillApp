@@ -56,6 +56,7 @@ object PillEventFirestoreService {
                 "pillName" to event.pillName,
                 "amount" to event.amount,
                 "time" to event.time,
+                "dispensed" to event.dispensed,
                 "createdAt" to FieldValue.serverTimestamp()
             )
 
@@ -212,6 +213,36 @@ object PillEventFirestoreService {
     }
 
     /**
+     * Mark a pill event as dispensed in Firestore
+     * @param eventId ID of the event to mark as dispensed
+     * @return true if updated successfully, false otherwise
+     */
+    suspend fun markEventAsDispensed(eventId: String): Boolean {
+        return try {
+            Log.d(TAG, "Marking event as dispensed: eventId=$eventId")
+            
+            if (eventId.isBlank()) {
+                Log.e(TAG, "EventId is empty")
+                return false
+            }
+
+            db.collection(PILL_EVENTS_COLLECTION)
+                .document(eventId)
+                .update("dispensed", true)
+                .await()
+
+            Log.d(TAG, "Event marked as dispensed successfully: $eventId")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error marking event as dispensed", e)
+            Log.e(TAG, "Error type: ${e.javaClass.simpleName}")
+            Log.e(TAG, "Error message: ${e.message}")
+            e.printStackTrace()
+            false
+        }
+    }
+
+    /**
      * Convert Firestore document to PillEvent
      */
     private fun documentToPillEvent(document: com.google.firebase.firestore.DocumentSnapshot): PillEvent? {
@@ -221,6 +252,7 @@ object PillEventFirestoreService {
             val pillName = document.getString("pillName") ?: ""
             val amount = document.getString("amount") ?: ""
             val time = document.getString("time") ?: ""
+            val dispensed = document.getBoolean("dispensed") ?: false
 
             if (dateTimestamp == null) {
                 Log.e(TAG, "Date timestamp is null for document ${document.id}")
@@ -235,7 +267,8 @@ object PillEventFirestoreService {
                 date = date,
                 pillName = pillName,
                 amount = amount,
-                time = time
+                time = time,
+                dispensed = dispensed
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error converting document to PillEvent", e)
