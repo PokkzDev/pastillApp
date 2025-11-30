@@ -71,4 +71,8 @@ dependencies {
     
     // Gson for JSON serialization
     implementation(libs.gson)
+    
+    // SQLCipher for encrypted database (ISO 27001 A.10 - Protección de datos personales 3.1.4.12)
+    implementation(libs.sqlcipher)
+    implementation(libs.androidx.sqlite)
 }

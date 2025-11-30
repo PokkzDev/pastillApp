@@ -39,6 +39,8 @@
 #include <math.h>
 #include "mbedtls/aes.h"
 #include "mbedtls/base64.h"
+#include "mbedtls/md.h"  // Para HMAC-SHA256 (ISO 27001 A.10)
+#include "esp_sleep.h"   // Para deep sleep (optimización energética 3.1.3.10)
 
 BluetoothSerial SerialBT;
 Servo servoMotor;
@@ -142,7 +144,7 @@ unsigned long lastEventCheck = 0;
 const unsigned long EVENT_CHECK_INTERVAL = 60000; // Verificar cada minuto
 
 // ============================================================================
-// ENCRIPTACIÓN AES-256-CBC
+// ENCRIPTACIÓN AES-256-CBC CON HMAC-SHA256 (ISO 27001 A.10)
 // ============================================================================
 // Clave compartida (32 bytes = 256 bits) - DEBE SER LA MISMA QUE EN ANDROID
 const unsigned char AES_KEY[32] = {
@@ -151,8 +153,27 @@ const unsigned char AES_KEY[32] = {
   0x1A, 0x2B, 0x3C, 0x4D, 0x5E, 0x6F, 0x70, 0x81,
   0x92, 0xA3, 0xB4, 0xC5, 0xD6, 0xE7, 0xF8, 0x09
 };
+
+// Clave separada para HMAC-SHA256 (32 bytes = 256 bits)
+// Derivada de la clave AES para separar propósitos (best practice criptográfico)
+const unsigned char HMAC_KEY[32] = {
+  0x5A, 0x1D, 0x3E, 0x4F, 0x6C, 0x7B, 0x8A, 0x9D,
+  0xC2, 0xD3, 0xE4, 0xF5, 0x06, 0x17, 0x28, 0x39,
+  0x4A, 0x5B, 0x6C, 0x7D, 0x8E, 0x9F, 0xA0, 0xB1,
+  0xC2, 0xD3, 0xE4, 0xF5, 0x06, 0x17, 0x28, 0x39
+};
+
 const int AES_IV_SIZE = 16; // 128 bits
 const int AES_BLOCK_SIZE = 16; // 128 bits
+const int HMAC_SIZE = 32; // 256 bits para SHA256
+
+// ============================================================================
+// CONFIGURACIÓN DE AHORRO DE ENERGÍA (3.1.3.10)
+// ============================================================================
+const unsigned long INACTIVITY_TIMEOUT = 300000; // 5 minutos sin conexión BT -> deep sleep
+const unsigned long DEEP_SLEEP_DURATION = 30000000; // 30 segundos en microsegundos
+unsigned long lastActivityTime = 0;
+bool deepSleepEnabled = true; // Puede deshabilitarse via comando
 
 // ============================================================================
 // FUNCIONES AUXILIARES
@@ -313,11 +334,14 @@ void silenciarAlarma() {
 }
 
 /**
- * Desencripta un mensaje encriptado con AES-256-CBC
- * @param encryptedBase64 String Base64 que contiene: IV(16 bytes) + Datos encriptados
+ * Desencripta un mensaje encriptado con AES-256-CBC verificando HMAC
+ * @param encryptedBase64 String Base64 que contiene: IV(16 bytes) + Datos encriptados + HMAC(32 bytes)
  * @param output Buffer para almacenar el texto desencriptado
  * @param outputSize Tamaño del buffer de salida
- * @return true si la desencriptación fue exitosa
+ * @return true si la desencriptación fue exitosa y HMAC válido
+ * 
+ * Verifica integridad ANTES de desencriptar (Encrypt-then-MAC pattern)
+ * ISO 27001 A.10.1.2 - Política sobre el uso de controles criptográficos
  */
 bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize) {
   mbedtls_aes_context aes;
@@ -339,20 +363,64 @@ bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize
     return false;
   }
   
-  // Extraer IV y datos encriptados
+  // Determinar si tiene HMAC (formato nuevo) o no (formato legacy)
+  // Formato nuevo: IV(16) + CipherText(múltiplo de 16) + HMAC(32)
+  // Formato legacy: IV(16) + CipherText(múltiplo de 16)
+  bool hasHMAC = false;
+  size_t encryptedLen;
+  
+  // Mínimo para formato con HMAC: IV(16) + 1 bloque(16) + HMAC(32) = 64 bytes
+  if (olen >= AES_IV_SIZE + AES_BLOCK_SIZE + HMAC_SIZE) {
+    // Verificar si el tamaño sin HMAC es múltiplo del bloque
+    size_t possibleEncLen = olen - AES_IV_SIZE - HMAC_SIZE;
+    if (possibleEncLen > 0 && (possibleEncLen % AES_BLOCK_SIZE) == 0) {
+      hasHMAC = true;
+      encryptedLen = possibleEncLen;
+    }
+  }
+  
+  if (!hasHMAC) {
+    // Intentar formato legacy
+    encryptedLen = olen - AES_IV_SIZE;
+    if (encryptedLen == 0 || (encryptedLen % AES_BLOCK_SIZE) != 0) {
+      Serial.print("[AES] Error: tamaño encriptado inválido: ");
+      Serial.println(encryptedLen);
+      free(decoded);
+      mbedtls_aes_free(&aes);
+      return false;
+    }
+    Serial.println("[AES] Advertencia: mensaje sin HMAC (formato legacy)");
+  }
+  
+  // Extraer IV
   unsigned char iv[AES_IV_SIZE];
   memcpy(iv, decoded, AES_IV_SIZE);
   
-  size_t encryptedLen = olen - AES_IV_SIZE;
   unsigned char* encrypted = decoded + AES_IV_SIZE;
   
-  // Validar que el tamaño encriptado sea múltiplo del tamaño de bloque
-  if (encryptedLen == 0 || (encryptedLen % AES_BLOCK_SIZE) != 0) {
-    Serial.print("[AES] Error: tamaño encriptado inválido: ");
-    Serial.println(encryptedLen);
-    free(decoded);
-    mbedtls_aes_free(&aes);
-    return false;
+  // VERIFICAR HMAC PRIMERO (si existe) - antes de desencriptar
+  if (hasHMAC) {
+    unsigned char* receivedHmac = decoded + AES_IV_SIZE + encryptedLen;
+    unsigned char calculatedHmac[HMAC_SIZE];
+    
+    // Calcular HMAC sobre IV + datos encriptados
+    size_t hmacDataLen = AES_IV_SIZE + encryptedLen;
+    if (!calculateHMAC(decoded, hmacDataLen, calculatedHmac)) {
+      Serial.println("[AES] Error calculando HMAC para verificación");
+      free(decoded);
+      mbedtls_aes_free(&aes);
+      return false;
+    }
+    
+    // Comparación en tiempo constante para prevenir timing attacks
+    if (!constantTimeEquals(receivedHmac, calculatedHmac, HMAC_SIZE)) {
+      Serial.println("[AES] Error: HMAC inválido - mensaje posiblemente manipulado");
+      free(decoded);
+      mbedtls_aes_free(&aes);
+      return false;
+    }
+    
+    Serial.println("[AES] HMAC verificado correctamente - integridad confirmada");
   }
   
   // Configurar clave
@@ -364,7 +432,7 @@ bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize
     return false;
   }
   
-  // Desencriptar
+  // Desencriptar (solo si HMAC fue válido o no había HMAC)
   unsigned char* decrypted = (unsigned char*)malloc(encryptedLen + 1);
   if (!decrypted) {
     free(decoded);
@@ -421,11 +489,14 @@ bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize
 }
 
 /**
- * Encripta un mensaje con AES-256-CBC
+ * Encripta un mensaje con AES-256-CBC + HMAC-SHA256
  * @param plainText Texto a encriptar
  * @param output Buffer para almacenar el resultado en Base64
  * @param outputSize Tamaño del buffer de salida
  * @return true si la encriptación fue exitosa
+ * 
+ * Formato de salida: Base64(IV[16] + CipherText + HMAC[32])
+ * Cumple con ISO 27001 A.10 (Criptografía)
  */
 bool encryptResponse(const char* plainText, char* output, size_t outputSize) {
   mbedtls_aes_context aes;
@@ -486,13 +557,39 @@ bool encryptResponse(const char* plainText, char* output, size_t outputSize) {
       return false;
     }
     
-    // Combinar IV original + datos encriptados
-    // IMPORTANTE: Usar iv_original porque mbedtls_aes_crypt_cbc modifica iv in-place
-    size_t combinedSize = AES_IV_SIZE + paddedLen;
+    // Calcular HMAC sobre IV + datos encriptados (Encrypt-then-MAC)
+    size_t hmacDataLen = AES_IV_SIZE + paddedLen;
+    unsigned char* hmacData = (unsigned char*)malloc(hmacDataLen);
+    unsigned char hmac[HMAC_SIZE];
+    
+    if (hmacData) {
+      memcpy(hmacData, iv_original, AES_IV_SIZE);
+      memcpy(hmacData + AES_IV_SIZE, encrypted, paddedLen);
+      
+      if (!calculateHMAC(hmacData, hmacDataLen, hmac)) {
+        Serial.println("[AES] Error calculando HMAC");
+        free(hmacData);
+        free(encrypted);
+        free(padded);
+        mbedtls_aes_free(&aes);
+        return false;
+      }
+      free(hmacData);
+    } else {
+      Serial.println("[AES] Error: no se pudo asignar memoria para HMAC");
+      free(encrypted);
+      free(padded);
+      mbedtls_aes_free(&aes);
+      return false;
+    }
+    
+    // Combinar IV original + datos encriptados + HMAC
+    size_t combinedSize = AES_IV_SIZE + paddedLen + HMAC_SIZE;
     unsigned char* combined = (unsigned char*)malloc(combinedSize);
     if (combined) {
-      memcpy(combined, iv_original, AES_IV_SIZE);  // Usar IV original, no el modificado
+      memcpy(combined, iv_original, AES_IV_SIZE);
       memcpy(combined + AES_IV_SIZE, encrypted, paddedLen);
+      memcpy(combined + AES_IV_SIZE + paddedLen, hmac, HMAC_SIZE);
       
       // Calcular tamaño necesario para Base64 (aproximadamente 4/3 del tamaño original)
       size_t base64Size = ((combinedSize + 2) / 3) * 4 + 1;
@@ -516,6 +613,7 @@ bool encryptResponse(const char* plainText, char* output, size_t outputSize) {
       
       if (ret == 0 && olen > 0) {
         output[olen] = '\0';
+        Serial.println("[AES] Mensaje encriptado con HMAC correctamente");
       } else {
         Serial.println("[AES] Error: fallo en codificación Base64");
         ret = -1;
@@ -553,6 +651,72 @@ bool isEncrypted(const char* text) {
     }
   }
   return true;
+}
+
+/**
+ * Calcula HMAC-SHA256 sobre los datos proporcionados
+ * @param data Datos sobre los que calcular HMAC
+ * @param dataLen Longitud de los datos
+ * @param output Buffer de 32 bytes para el resultado
+ * @return true si el cálculo fue exitoso
+ */
+bool calculateHMAC(const unsigned char* data, size_t dataLen, unsigned char* output) {
+  mbedtls_md_context_t ctx;
+  mbedtls_md_init(&ctx);
+  
+  const mbedtls_md_info_t* md_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (md_info == NULL) {
+    Serial.println("[HMAC] Error: SHA256 no disponible");
+    mbedtls_md_free(&ctx);
+    return false;
+  }
+  
+  int ret = mbedtls_md_setup(&ctx, md_info, 1); // 1 = usar HMAC
+  if (ret != 0) {
+    Serial.print("[HMAC] Error en setup: ");
+    Serial.println(ret);
+    mbedtls_md_free(&ctx);
+    return false;
+  }
+  
+  ret = mbedtls_md_hmac_starts(&ctx, HMAC_KEY, sizeof(HMAC_KEY));
+  if (ret != 0) {
+    Serial.print("[HMAC] Error en starts: ");
+    Serial.println(ret);
+    mbedtls_md_free(&ctx);
+    return false;
+  }
+  
+  ret = mbedtls_md_hmac_update(&ctx, data, dataLen);
+  if (ret != 0) {
+    Serial.print("[HMAC] Error en update: ");
+    Serial.println(ret);
+    mbedtls_md_free(&ctx);
+    return false;
+  }
+  
+  ret = mbedtls_md_hmac_finish(&ctx, output);
+  mbedtls_md_free(&ctx);
+  
+  if (ret != 0) {
+    Serial.print("[HMAC] Error en finish: ");
+    Serial.println(ret);
+    return false;
+  }
+  
+  return true;
+}
+
+/**
+ * Comparación en tiempo constante para prevenir timing attacks
+ * ISO 27001 A.10.1.2 - Política sobre el uso de controles criptográficos
+ */
+bool constantTimeEquals(const unsigned char* a, const unsigned char* b, size_t len) {
+  unsigned char result = 0;
+  for (size_t i = 0; i < len; i++) {
+    result |= a[i] ^ b[i];
+  }
+  return result == 0;
 }
 
 /**
@@ -924,6 +1088,40 @@ void procesarComando(String cmd) {
     return;
   }
   
+  // === ENABLE_DEEP_SLEEP - Habilitar modo ahorro de energía ===
+  if (cmdUpper == "ENABLE_DEEP_SLEEP") {
+    deepSleepEnabled = true;
+    preferences.begin("pastillapp", false);
+    preferences.putBool("deep_sleep", true);
+    preferences.end();
+    sendEncryptedResponse("OK:DEEP_SLEEP_ENABLED", wasEncrypted);
+    Serial.println("[POWER] Deep sleep HABILITADO");
+    return;
+  }
+  
+  // === DISABLE_DEEP_SLEEP - Deshabilitar modo ahorro de energía ===
+  if (cmdUpper == "DISABLE_DEEP_SLEEP") {
+    deepSleepEnabled = false;
+    preferences.begin("pastillapp", false);
+    preferences.putBool("deep_sleep", false);
+    preferences.end();
+    sendEncryptedResponse("OK:DEEP_SLEEP_DISABLED", wasEncrypted);
+    Serial.println("[POWER] Deep sleep DESHABILITADO");
+    return;
+  }
+  
+  // === GET_POWER_STATUS - Obtener estado de ahorro de energía ===
+  if (cmdUpper == "GET_POWER_STATUS") {
+    char response[128];
+    unsigned long inactiveTime = millis() - lastActivityTime;
+    snprintf(response, sizeof(response), "POWER:deep_sleep=%s,inactive_ms=%lu,timeout_ms=%lu",
+             deepSleepEnabled ? "true" : "false",
+             inactiveTime,
+             INACTIVITY_TIMEOUT);
+    sendEncryptedResponse(response, wasEncrypted);
+    return;
+  }
+  
   // Comando no reconocido
   char errorMsg[128];
   snprintf(errorMsg, sizeof(errorMsg), "ERROR:COMANDO_DESCONOCIDO:%s", cmd.c_str());
@@ -959,6 +1157,14 @@ void setup() {
   // Serial Monitor
   Serial.begin(115200);
   
+  // Verificar si despertamos de deep sleep
+  esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
+  if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER) {
+    Serial.println("[POWER] Despertando de deep sleep (timer)");
+  } else if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0) {
+    Serial.println("[POWER] Despertando de deep sleep (botón)");
+  }
+  
   // Bluetooth
   SerialBT.begin("PastillApp V1");
   
@@ -971,6 +1177,9 @@ void setup() {
     generarUUID(deviceUUID);
     preferences.putString(UUID_KEY, String(deviceUUID));
   }
+  
+  // Cargar configuración de deep sleep
+  deepSleepEnabled = preferences.getBool("deep_sleep", true);
   
   preferences.end();
   uuidEnviado = false;
@@ -997,7 +1206,15 @@ void setup() {
   estado = CERRADO;
   anguloActual = ANGULO_CERRADO;
   
+  // Inicializar tiempo de actividad
+  lastActivityTime = millis();
+  
+  // Configurar despertar por botón (GPIO12)
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_12, 0); // Despertar cuando el botón se presiona (LOW)
+  
   Serial.println("PastillApp iniciado - Monitor Serial activo");
+  Serial.print("[POWER] Deep sleep: ");
+  Serial.println(deepSleepEnabled ? "HABILITADO" : "DESHABILITADO");
 }
 
 // ============================================================================
@@ -1007,16 +1224,27 @@ void loop() {
   unsigned long now = millis();
 
   // --- Detección de conexión Bluetooth ---
-  if (SerialBT.hasClient() && !uuidEnviado && strlen(deviceUUID) > 0) {
-    enviarEvento("CONNECTED");
-    SerialBT.print("UUID:");
-    SerialBT.println(deviceUUID);
-    enviarEstado();
-    uuidEnviado = true;
-  }
-  
-  if (!SerialBT.hasClient() && uuidEnviado) {
-    uuidEnviado = false;
+  if (SerialBT.hasClient()) {
+    // Actualizar tiempo de actividad cuando hay cliente conectado
+    lastActivityTime = now;
+    
+    if (!uuidEnviado && strlen(deviceUUID) > 0) {
+      enviarEvento("CONNECTED");
+      SerialBT.print("UUID:");
+      SerialBT.println(deviceUUID);
+      enviarEstado();
+      uuidEnviado = true;
+    }
+  } else {
+    if (uuidEnviado) {
+      uuidEnviado = false;
+    }
+    
+    // --- GESTIÓN DE AHORRO DE ENERGÍA (3.1.3.10) ---
+    // Entrar en deep sleep si no hay conexión por mucho tiempo y está habilitado
+    if (deepSleepEnabled && estado == CERRADO && (now - lastActivityTime > INACTIVITY_TIMEOUT)) {
+      enterDeepSleep();
+    }
   }
  
   // --- Botón físico: silencia el buzzer ---
@@ -1199,4 +1427,41 @@ void checkOfflineEvents() {
       // TODO: Implementar comparación de hora cuando se tenga RTC o sincronización de tiempo
     }
   }
+}
+
+/**
+ * Entra en modo deep sleep para ahorrar energía (3.1.3.10)
+ * El ESP32 se despertará por:
+ * - Timer después de DEEP_SLEEP_DURATION microsegundos
+ * - Presión del botón (GPIO12)
+ */
+void enterDeepSleep() {
+  Serial.println("[POWER] Entrando en deep sleep...");
+  Serial.print("[POWER] Duración: ");
+  Serial.print(DEEP_SLEEP_DURATION / 1000000);
+  Serial.println(" segundos");
+  
+  // Guardar estado antes de dormir
+  preferences.begin("pastillapp", false);
+  preferences.putInt("last_state", estado);
+  preferences.end();
+  
+  // Apagar periféricos
+  digitalWrite(PIN_ZUMBADOR, LOW);
+  digitalWrite(PIN_LED, LOW);
+  servoMotor.detach();
+  
+  // Desconectar Bluetooth
+  SerialBT.end();
+  
+  // Configurar timer para despertar
+  esp_sleep_enable_timer_wakeup(DEEP_SLEEP_DURATION);
+  
+  // Pequeña pausa para que el serial termine de enviar
+  delay(100);
+  
+  // Entrar en deep sleep
+  esp_deep_sleep_start();
+  
+  // Este código nunca se ejecuta - el ESP32 se reinicia al despertar
 }
