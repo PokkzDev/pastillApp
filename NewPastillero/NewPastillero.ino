@@ -451,8 +451,10 @@ bool encryptResponse(const char* plainText, char* output, size_t outputSize) {
   
   // Generar IV aleatorio
   unsigned char iv[AES_IV_SIZE];
+  unsigned char iv_original[AES_IV_SIZE];  // Copia del IV original (mbedtls modifica iv in-place)
   for (int i = 0; i < AES_IV_SIZE; i++) {
-    iv[i] = random(256);
+    iv[i] = esp_random() & 0xFF;  // Usar esp_random() para mejor entropía
+    iv_original[i] = iv[i];       // Guardar copia antes de encriptación
   }
   
   // Configurar clave
@@ -484,11 +486,12 @@ bool encryptResponse(const char* plainText, char* output, size_t outputSize) {
       return false;
     }
     
-    // Combinar IV + datos encriptados
+    // Combinar IV original + datos encriptados
+    // IMPORTANTE: Usar iv_original porque mbedtls_aes_crypt_cbc modifica iv in-place
     size_t combinedSize = AES_IV_SIZE + paddedLen;
     unsigned char* combined = (unsigned char*)malloc(combinedSize);
     if (combined) {
-      memcpy(combined, iv, AES_IV_SIZE);
+      memcpy(combined, iv_original, AES_IV_SIZE);  // Usar IV original, no el modificado
       memcpy(combined + AES_IV_SIZE, encrypted, paddedLen);
       
       // Calcular tamaño necesario para Base64 (aproximadamente 4/3 del tamaño original)
