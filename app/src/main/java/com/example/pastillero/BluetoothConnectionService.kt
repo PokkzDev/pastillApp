@@ -31,9 +31,12 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * 
  * Características:
  * - Mantiene la conexión en segundo plano
- * - Auto-reconexión con backoff exponencial
- * - Heartbeat para verificar conexión
- * - Cola de comandos durante reconexión
+ * - Auto-reconexión con backoff exponencial mejorado (3.1.1.3)
+ * - Heartbeat adaptativo según nivel de batería (3.1.3.10)
+ * - Cola de comandos durante reconexión con almacenamiento offline (3.1.2.7)
+ * - Verificación de integridad de mensajes con HMAC (3.1.1.2)
+ * - Plan de contingencia en caso de fallas (3.1.4.13)
+ * - Optimización de consumo energético (3.1.3.10)
  */
 class BluetoothConnectionService : Service() {
 
@@ -45,10 +48,10 @@ class BluetoothConnectionService : Service() {
         // UUID estándar para Serial Port Profile (SPP)
         private val SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
         
-        // Tiempos de reconexión (backoff exponencial)
+        // Tiempos de reconexión (backoff exponencial mejorado)
         private const val INITIAL_RECONNECT_DELAY = 1000L // 1 segundo
-        private const val MAX_RECONNECT_DELAY = 30000L // 30 segundos
-        private const val HEARTBEAT_INTERVAL = 5000L // 5 segundos
+        private const val MAX_RECONNECT_DELAY = 60000L // 60 segundos (aumentado)
+        private const val MAX_RECONNECT_ATTEMPTS = 10 // Máximo de intentos antes de reporte
         private const val READ_TIMEOUT_MS = 3000L
         
         // Actions
@@ -78,6 +81,7 @@ class BluetoothConnectionService : Service() {
     private var isConnected = false
     private var shouldReconnect = true
     private var reconnectDelay = INITIAL_RECONNECT_DELAY
+    private var reconnectAttempts = 0
     
     private var connectionJob: Job? = null
     private var readJob: Job? = null
@@ -89,6 +93,12 @@ class BluetoothConnectionService : Service() {
     // Estado actual del dispositivo ESP32
     private var currentDeviceStatus: String = "DESCONOCIDO"
     private var currentLdrValue: Int = 0
+    
+    // Gestores de nuevas funcionalidades
+    private lateinit var offlineDataManager: OfflineDataManager
+    private lateinit var powerOptimizationManager: PowerOptimizationManager
+    private lateinit var contingencyPlanManager: ContingencyPlanManager
+    private var currentHeartbeatInterval = 5000L
 
     inner class LocalBinder : Binder() {
         fun getService(): BluetoothConnectionService = this@BluetoothConnectionService
@@ -97,7 +107,20 @@ class BluetoothConnectionService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        Log.d(TAG, "Servicio creado")
+        
+        // Inicializar gestores
+        offlineDataManager = OfflineDataManager(this)
+        powerOptimizationManager = PowerOptimizationManager(this)
+        contingencyPlanManager = ContingencyPlanManager(this)
+        
+        // Iniciar monitoreo de batería para optimización dinámica
+        powerOptimizationManager.startBatteryMonitoring(serviceScope) { batteryLevel ->
+            // Ajustar intervalo de heartbeat según nivel de batería
+            currentHeartbeatInterval = powerOptimizationManager.getOptimalHeartbeatInterval()
+            Log.d(TAG, "Heartbeat ajustado a ${currentHeartbeatInterval}ms (batería: $batteryLevel%)")
+        }
+        
+        Log.d(TAG, "Servicio creado con gestores de optimización")
     }
 
     override fun onBind(intent: Intent?): IBinder {
@@ -129,6 +152,11 @@ class BluetoothConnectionService : Service() {
         super.onDestroy()
         shouldReconnect = false
         disconnect()
+        
+        // Limpiar gestores
+        powerOptimizationManager.cleanup()
+        offlineDataManager.stopAutoSync()
+        
         serviceScope.cancel()
         Log.d(TAG, "Servicio destruido")
     }
@@ -145,6 +173,7 @@ class BluetoothConnectionService : Service() {
         device = bluetoothDevice
         shouldReconnect = true
         reconnectDelay = INITIAL_RECONNECT_DELAY
+        reconnectAttempts = 0
         
         startForeground(NOTIFICATION_ID, createNotification("Conectando..."))
         startConnection()
@@ -166,16 +195,31 @@ class BluetoothConnectionService : Service() {
 
     /**
      * Envía un comando al dispositivo ESP32
-     * El comando se encripta con AES antes de enviarlo
+     * El comando se encripta con AES y se añade HMAC para verificación de integridad
      */
     fun sendCommand(command: String) {
         if (isConnected) {
             serviceScope.launch {
                 try {
-                    // Encriptar comando antes de enviar
-                    val encryptedCommand = BluetoothEncryption.encrypt(command)
+                    // Añadir HMAC para verificación de integridad (3.1.1.2)
+                    val commandWithHMAC = MessageIntegrityValidator.attachHMAC(command)
+                    if (commandWithHMAC == null) {
+                        Log.e(TAG, "Error generando HMAC para comando: $command")
+                        contingencyPlanManager.reportFailure(
+                            ContingencyPlanManager.FailureType.DATA_INTEGRITY_ERROR,
+                            "No se pudo generar HMAC"
+                        )
+                        return@launch
+                    }
+                    
+                    // Encriptar comando antes de enviar (3.1.1.1)
+                    val encryptedCommand = BluetoothEncryption.encrypt(commandWithHMAC)
                     if (encryptedCommand == null) {
                         Log.e(TAG, "Error encriptando comando: $command")
+                        contingencyPlanManager.reportFailure(
+                            ContingencyPlanManager.FailureType.COMMAND_SEND_FAILED,
+                            "Error de encriptación"
+                        )
                         return@launch
                     }
                     
@@ -183,16 +227,23 @@ class BluetoothConnectionService : Service() {
                     val commandBytes = "$encryptedCommand\n".toByteArray()
                     outputStream?.write(commandBytes)
                     outputStream?.flush()
-                    Log.d(TAG, "Comando encriptado enviado: ${command.take(20)}...")
+                    Log.d(TAG, "Comando enviado con HMAC y encriptación: ${command.take(20)}...")
                 } catch (e: IOException) {
                     Log.e(TAG, "Error enviando comando", e)
+                    contingencyPlanManager.reportFailure(
+                        ContingencyPlanManager.FailureType.COMMAND_SEND_FAILED,
+                        e.message ?: "IOException"
+                    )
                     handleConnectionLost()
                 }
             }
         } else {
-            // Encolar comando para cuando se reconecte
+            // Encolar comando y guardar offline para cuando se reconecte (3.1.1.4, 3.1.2.7)
             commandQueue.offer(command)
-            Log.d(TAG, "Comando encolado: $command")
+            serviceScope.launch {
+                offlineDataManager.savePendingCommand(command, priority = 7)
+            }
+            Log.d(TAG, "Comando encolado y guardado offline: $command")
         }
     }
 
@@ -237,7 +288,18 @@ class BluetoothConnectionService : Service() {
         connectionJob = serviceScope.launch {
             while (shouldReconnect && !isConnected) {
                 try {
-                    Log.d(TAG, "Intentando conectar a ${device?.name}")
+                    reconnectAttempts++
+                    Log.d(TAG, "Intento de conexión #$reconnectAttempts a ${device?.name}")
+                    
+                    // Reportar falla si excede máximo de intentos
+                    if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+                        contingencyPlanManager.reportFailure(
+                            ContingencyPlanManager.FailureType.BLUETOOTH_CONNECTION_LOST,
+                            "Excedidos $MAX_RECONNECT_ATTEMPTS intentos de reconexión"
+                        )
+                        // Resetear contador después de reporte
+                        reconnectAttempts = 0
+                    }
                     
                     if (!hasBluetoothPermission()) {
                         Log.e(TAG, "Sin permisos de Bluetooth")
@@ -245,7 +307,7 @@ class BluetoothConnectionService : Service() {
                         continue
                     }
                     
-                    // Verificación de bonding (requisito de seguridad)
+                    // Verificación de bonding (requisito de seguridad 3.1.4.11)
                     val bondState = device?.bondState
                     if (bondState != BOND_BONDED) {
                         Log.w(TAG, "Dispositivo no está vinculado (bonded). Estado: $bondState")
@@ -263,18 +325,30 @@ class BluetoothConnectionService : Service() {
                             
                             if (device?.bondState != BOND_BONDED) {
                                 Log.e(TAG, "No se pudo establecer bonding. Rechazando conexión.")
+                                contingencyPlanManager.reportFailure(
+                                    ContingencyPlanManager.FailureType.BLUETOOTH_PAIRING_FAILED,
+                                    "Timeout esperando bonding"
+                                )
                                 delay(reconnectDelay)
                                 continue
                             }
                             Log.d(TAG, "Bonding completado exitosamente")
                         } else {
                             Log.e(TAG, "No se pudo iniciar el proceso de bonding")
+                            contingencyPlanManager.reportFailure(
+                                ContingencyPlanManager.FailureType.BLUETOOTH_PAIRING_FAILED,
+                                "createBond() falló"
+                            )
                             delay(reconnectDelay)
                             continue
                         }
                     }
                     
                     Log.d(TAG, "Dispositivo está vinculado, procediendo con conexión")
+                    
+                    // Adquirir wake lock para operación crítica (3.1.3.10)
+                    powerOptimizationManager.acquireWakeLock()
+                    
                     socket = device?.createRfcommSocketToServiceRecord(SPP_UUID)
                     socket?.connect()
                     
@@ -283,28 +357,48 @@ class BluetoothConnectionService : Service() {
                     
                     isConnected = true
                     reconnectDelay = INITIAL_RECONNECT_DELAY
+                    reconnectAttempts = 0 // Resetear contador tras conexión exitosa
                     
-                    Log.d(TAG, "Conexión exitosa")
+                    // Liberar wake lock
+                    powerOptimizationManager.releaseWakeLock()
+                    
+                    Log.d(TAG, "✓ Conexión exitosa")
                     updateNotification("Conectado a ${getDeviceName()}")
                     notifyConnectionState(true)
                     
-                    // Procesar comandos encolados
+                    // Procesar comandos encolados y offline (3.1.2.7)
                     processQueuedCommands()
+                    
+                    // Sincronizar comandos guardados offline
+                    serviceScope.launch {
+                        offlineDataManager.syncPendingCommands(this@BluetoothConnectionService)
+                    }
                     
                     // Iniciar lectura continua
                     startReading()
                     
-                    // Iniciar heartbeat
+                    // Iniciar heartbeat adaptativo (3.1.3.10)
                     startHeartbeat()
                     
                 } catch (e: IOException) {
                     Log.e(TAG, "Error de conexión, reintentando en ${reconnectDelay}ms", e)
+                    contingencyPlanManager.reportFailure(
+                        ContingencyPlanManager.FailureType.BLUETOOTH_CONNECTION_LOST,
+                        e.message ?: "IOException durante conexión"
+                    )
                     closeConnection()
+                    powerOptimizationManager.releaseWakeLock()
                     
                     delay(reconnectDelay)
+                    // Backoff exponencial mejorado (3.1.1.3)
                     reconnectDelay = (reconnectDelay * 2).coerceAtMost(MAX_RECONNECT_DELAY)
                 } catch (e: SecurityException) {
                     Log.e(TAG, "Error de permisos", e)
+                    contingencyPlanManager.reportFailure(
+                        ContingencyPlanManager.FailureType.AUTHENTICATION_FAILED,
+                        e.message ?: "SecurityException"
+                    )
+                    powerOptimizationManager.releaseWakeLock()
                     delay(reconnectDelay)
                 }
             }
@@ -354,20 +448,37 @@ class BluetoothConnectionService : Service() {
         heartbeatJob?.cancel()
         heartbeatJob = serviceScope.launch {
             while (isConnected && isActive) {
-                delay(HEARTBEAT_INTERVAL)
+                // Usar intervalo adaptativo según nivel de batería (3.1.3.10)
+                delay(currentHeartbeatInterval)
+                
                 if (isConnected) {
                     try {
-                        // Encriptar PING antes de enviar
-                        val encryptedPing = BluetoothEncryption.encrypt("PING")
+                        // Añadir HMAC al PING para verificación de integridad (3.1.1.2)
+                        val pingWithHMAC = MessageIntegrityValidator.attachHMAC("PING")
+                        if (pingWithHMAC == null) {
+                            Log.e(TAG, "Error generando HMAC para heartbeat")
+                            continue
+                        }
+                        
+                        // Encriptar PING antes de enviar (3.1.1.1)
+                        val encryptedPing = BluetoothEncryption.encrypt(pingWithHMAC)
                         if (encryptedPing != null) {
                             outputStream?.write("$encryptedPing\n".toByteArray())
                             outputStream?.flush()
-                            Log.d(TAG, "Heartbeat encriptado enviado")
+                            Log.d(TAG, "Heartbeat enviado (intervalo: ${currentHeartbeatInterval}ms)")
                         } else {
                             Log.e(TAG, "Error encriptando heartbeat")
+                            contingencyPlanManager.reportFailure(
+                                ContingencyPlanManager.FailureType.COMMAND_SEND_FAILED,
+                                "Error encriptando heartbeat"
+                            )
                         }
                     } catch (e: IOException) {
                         Log.e(TAG, "Error en heartbeat", e)
+                        contingencyPlanManager.reportFailure(
+                            ContingencyPlanManager.FailureType.DEVICE_NOT_RESPONDING,
+                            "Heartbeat falló: ${e.message}"
+                        )
                         handleConnectionLost()
                         break
                     }
@@ -379,13 +490,27 @@ class BluetoothConnectionService : Service() {
     private fun processReceivedData(data: String) {
         Log.d(TAG, "Datos recibidos (raw): $data")
         
-        // Intentar desencriptar el mensaje
+        // Intentar desencriptar el mensaje (3.1.1.1)
         var decryptedData = data
         if (BluetoothEncryption.isEncrypted(data)) {
             val decrypted = BluetoothEncryption.decrypt(data)
             if (decrypted != null) {
                 decryptedData = decrypted
                 Log.d(TAG, "Datos desencriptados: $decryptedData")
+                
+                // Verificar integridad con HMAC (3.1.1.2)
+                val verifiedMessage = MessageIntegrityValidator.verifyAndExtract(decryptedData)
+                if (verifiedMessage != null) {
+                    decryptedData = verifiedMessage
+                    Log.d(TAG, "✓ Integridad verificada correctamente")
+                } else {
+                    Log.e(TAG, "✗ Integridad comprometida: HMAC inválido")
+                    contingencyPlanManager.reportFailure(
+                        ContingencyPlanManager.FailureType.DATA_INTEGRITY_ERROR,
+                        "HMAC inválido en mensaje recibido"
+                    )
+                    return // No procesar mensaje comprometido
+                }
             } else {
                 Log.w(TAG, "No se pudo desencriptar, procesando como texto plano")
                 // Intentar procesar como texto plano (compatibilidad hacia atrás)
@@ -443,12 +568,25 @@ class BluetoothConnectionService : Service() {
     }
 
     private fun handleConnectionLost() {
-        Log.d(TAG, "Conexión perdida")
+        Log.d(TAG, "⚠️ Conexión perdida")
+        contingencyPlanManager.reportFailure(
+            ContingencyPlanManager.FailureType.BLUETOOTH_CONNECTION_LOST,
+            "Conexión perdida inesperadamente"
+        )
         closeConnection()
         
         if (shouldReconnect) {
             updateNotification("Reconectando...")
             notifyConnectionState(false)
+            
+            // Intentar recuperación automática (3.1.4.13)
+            serviceScope.launch {
+                contingencyPlanManager.attemptRecovery(
+                    this@BluetoothConnectionService,
+                    offlineDataManager
+                )
+            }
+            
             startConnection()
         }
     }

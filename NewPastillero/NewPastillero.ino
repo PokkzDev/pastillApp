@@ -39,6 +39,7 @@
 #include <math.h>
 #include "mbedtls/aes.h"
 #include "mbedtls/base64.h"
+#include "mbedtls/md.h"      // Para HMAC-SHA256
 
 BluetoothSerial SerialBT;
 Servo servoMotor;
@@ -131,6 +132,24 @@ const unsigned char AES_KEY[32] = {
 };
 const int AES_IV_SIZE = 16; // 128 bits
 const int AES_BLOCK_SIZE = 16; // 128 bits
+
+// ============================================================================
+// HMAC-SHA256 PARA INTEGRIDAD DE DATOS (3.1.1.2)
+// ============================================================================
+// Clave HMAC (32 bytes) - DEBE SER LA MISMA QUE EN ANDROID
+const unsigned char HMAC_KEY[32] = {
+  0x3A, 0x8F, 0x24, 0x17, 0x39, 0xBE, 0xE3, 0xB7,
+  0xBA, 0xF8, 0x26, 0x99, 0x1A, 0xDF, 0x5F, 0x4D,
+  0x2B, 0x3C, 0x4D, 0x5E, 0x6F, 0x80, 0x91, 0xA2,
+  0xB3, 0xC4, 0xD5, 0xE6, 0xF7, 0x08, 0x19, 0x2A
+};
+
+// ============================================================================
+// OPTIMIZACIÓN ENERGÉTICA (3.1.3.10)
+// ============================================================================
+unsigned long lastActivityTime = 0;
+const unsigned long SLEEP_TIMEOUT = 300000; // 5 minutos sin actividad -> sleep
+bool lowPowerMode = false;
 
 // ============================================================================
 // FUNCIONES AUXILIARES
@@ -459,6 +478,138 @@ bool isEncrypted(const char* text) {
 }
 
 /**
+ * Genera HMAC-SHA256 para verificación de integridad (3.1.1.2)
+ * @param message Mensaje a proteger
+ * @param hmacOut Buffer para almacenar HMAC en hexadecimal (65 bytes)
+ * @return true si se generó correctamente
+ */
+bool generateHMAC(const char* message, char* hmacOut) {
+  unsigned char hmac[32]; // SHA-256 produce 32 bytes
+  
+  mbedtls_md_context_t ctx;
+  mbedtls_md_type_t md_type = MBEDTLS_MD_SHA256;
+  
+  mbedtls_md_init(&ctx);
+  
+  if (mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(md_type), 1) != 0) {
+    mbedtls_md_free(&ctx);
+    return false;
+  }
+  
+  if (mbedtls_md_hmac_starts(&ctx, HMAC_KEY, 32) != 0) {
+    mbedtls_md_free(&ctx);
+    return false;
+  }
+  
+  if (mbedtls_md_hmac_update(&ctx, (const unsigned char*)message, strlen(message)) != 0) {
+    mbedtls_md_free(&ctx);
+    return false;
+  }
+  
+  if (mbedtls_md_hmac_finish(&ctx, hmac) != 0) {
+    mbedtls_md_free(&ctx);
+    return false;
+  }
+  
+  mbedtls_md_free(&ctx);
+  
+  // Convertir a hexadecimal
+  for (int i = 0; i < 32; i++) {
+    sprintf(&hmacOut[i * 2], "%02x", hmac[i]);
+  }
+  hmacOut[64] = '\0';
+  
+  return true;
+}
+
+/**
+ * Verifica HMAC de un mensaje (3.1.1.2)
+ * @param message Mensaje recibido
+ * @param receivedHMAC HMAC recibido en hexadecimal
+ * @return true si el HMAC es válido
+ */
+bool verifyHMAC(const char* message, const char* receivedHMAC) {
+  char calculatedHMAC[65];
+  if (!generateHMAC(message, calculatedHMAC)) {
+    return false;
+  }
+  
+  // Comparación case-insensitive
+  return strcasecmp(calculatedHMAC, receivedHMAC) == 0;
+}
+
+/**
+ * Extrae y verifica mensaje con formato: mensaje|HMAC (3.1.1.2)
+ * @param messageWithHMAC Mensaje con HMAC adjunto
+ * @param output Buffer para almacenar mensaje verificado
+ * @param outputSize Tamaño del buffer de salida
+ * @return true si la integridad es válida
+ */
+bool verifyAndExtractMessage(const char* messageWithHMAC, char* output, size_t outputSize) {
+  // Buscar el separador |
+  const char* separator = strchr(messageWithHMAC, '|');
+  if (separator == NULL) {
+    Serial.println("[HMAC] Formato inválido: se esperaba mensaje|HMAC");
+    return false;
+  }
+  
+  // Extraer mensaje
+  size_t messageLen = separator - messageWithHMAC;
+  if (messageLen >= outputSize) {
+    Serial.println("[HMAC] Mensaje demasiado largo");
+    return false;
+  }
+  
+  strncpy(output, messageWithHMAC, messageLen);
+  output[messageLen] = '\0';
+  
+  // Extraer HMAC
+  const char* receivedHMAC = separator + 1;
+  
+  // Verificar integridad
+  if (verifyHMAC(output, receivedHMAC)) {
+    Serial.println("[HMAC] ✓ Integridad verificada");
+    return true;
+  } else {
+    Serial.println("[HMAC] ✗ Integridad comprometida");
+    return false;
+  }
+}
+
+/**
+ * Añade HMAC a un mensaje: mensaje|HMAC (3.1.1.2)
+ * @param message Mensaje original
+ * @param output Buffer para almacenar mensaje|HMAC
+ * @param outputSize Tamaño del buffer de salida
+ * @return true si se generó correctamente
+ */
+bool attachHMAC(const char* message, char* output, size_t outputSize) {
+  char hmac[65];
+  if (!generateHMAC(message, hmac)) {
+    return false;
+  }
+  
+  if (strlen(message) + 1 + 64 >= outputSize) {
+    Serial.println("[HMAC] Buffer insuficiente");
+    return false;
+  }
+  
+  sprintf(output, "%s|%s", message, hmac);
+  return true;
+}
+
+/**
+ * Actualiza timestamp de actividad para gestión de energía (3.1.3.10)
+ */
+void updateActivityTimestamp() {
+  lastActivityTime = millis();
+  if (lowPowerMode) {
+    Serial.println("[POWER] Saliendo de modo bajo consumo");
+    lowPowerMode = false;
+  }
+}
+
+/**
  * Genera un UUID único basado en el chip ID y tiempo
  * @param uuid Buffer para almacenar el UUID generado
  */
@@ -482,7 +633,10 @@ void generarUUID(char* uuid) {
  * @param cmd Comando recibido (ya trimmeado, puede estar encriptado)
  */
 void procesarComando(String cmd) {
-  // Intentar desencriptar el comando
+  // Actualizar timestamp de actividad (3.1.3.10)
+  updateActivityTimestamp();
+  
+  // Intentar desencriptar el comando (3.1.1.1)
   char decryptedCmd[128];
   bool wasEncrypted = false;
   
@@ -492,6 +646,16 @@ void procesarComando(String cmd) {
       wasEncrypted = true;
       Serial.print("[AES] Comando desencriptado: ");
       Serial.println(cmd);
+      
+      // Verificar integridad con HMAC (3.1.1.2)
+      char verifiedMessage[128];
+      if (!verifyAndExtractMessage(cmd.c_str(), verifiedMessage, sizeof(verifiedMessage))) {
+        Serial.println("[HMAC] Error: Integridad comprometida");
+        SerialBT.println("ERROR:INTEGRITY_FAILED");
+        return;
+      }
+      cmd = String(verifiedMessage);
+      Serial.println("[HMAC] ✓ Integridad verificada");
     } else {
       Serial.println("[AES] Error desencriptando comando");
       SerialBT.println("ERROR:DECRYPT_FAILED");
@@ -596,9 +760,19 @@ void sendEncryptedResponse(const char* response, bool encrypt) {
   if (!SerialBT.hasClient()) return;
   
   if (encrypt) {
-    char encrypted[256];
-    if (encryptResponse(response, encrypted, sizeof(encrypted))) {
+    // Añadir HMAC a la respuesta (3.1.1.2)
+    char responseWithHMAC[256];
+    if (!attachHMAC(response, responseWithHMAC, sizeof(responseWithHMAC))) {
+      Serial.println("[HMAC] Error añadiendo HMAC a respuesta");
+      SerialBT.println("ERROR:HMAC_FAILED");
+      return;
+    }
+    
+    // Encriptar respuesta con HMAC (3.1.1.1)
+    char encrypted[384];
+    if (encryptResponse(responseWithHMAC, encrypted, sizeof(encrypted))) {
       SerialBT.println(encrypted);
+      Serial.println("[TX] Respuesta enviada con HMAC y encriptación");
     } else {
       Serial.println("[AES] Error encriptando respuesta");
       SerialBT.println("ERROR:ENCRYPT_FAILED");
@@ -660,8 +834,16 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
+  // --- Gestión de energía (3.1.3.10) ---
+  if (!lowPowerMode && (now - lastActivityTime) > SLEEP_TIMEOUT) {
+    Serial.println("[POWER] Entrando en modo bajo consumo por inactividad");
+    lowPowerMode = true;
+    // Reducir frecuencia de telemetría
+  }
+
   // --- Detección de conexión Bluetooth ---
   if (SerialBT.hasClient() && !uuidEnviado && strlen(deviceUUID) > 0) {
+    updateActivityTimestamp();
     enviarEvento("CONNECTED");
     SerialBT.print("UUID:");
     SerialBT.println(deviceUUID);
@@ -677,6 +859,7 @@ void loop() {
   static bool ultimoBtn = HIGH;
   bool btn = digitalRead(PIN_BOTON);
   if (ultimoBtn == HIGH && btn == LOW) {
+    updateActivityTimestamp();
     silenciarAlarma();
     delay(50); // antirrebote
   }
@@ -684,6 +867,7 @@ void loop() {
 
   // --- Procesar comandos Bluetooth ---
   if (SerialBT.available()) {
+    updateActivityTimestamp();
     String cmd = SerialBT.readStringUntil('\n');
     cmd.trim();
     if (cmd.length() > 0) {
@@ -694,8 +878,11 @@ void loop() {
   // --- Lógica por estado ---
   switch (estado) {
     case ABIERTO:
-      // Telemetría LDR
-      if (now - tTelemetriaLDR >= INTERVALO_TELEMETRIA_LDR) {
+      // Telemetría LDR (ajustar frecuencia en modo bajo consumo)
+      unsigned long intervaloTelemetria = lowPowerMode ? 
+        (INTERVALO_TELEMETRIA_LDR * 2) : INTERVALO_TELEMETRIA_LDR;
+      
+      if (now - tTelemetriaLDR >= intervaloTelemetria) {
         tTelemetriaLDR = now;
         int lecturaInst = leerLDRPromedio();
         Serial.print("[LDR] Lectura: ");
