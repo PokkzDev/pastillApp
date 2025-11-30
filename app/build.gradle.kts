@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.ksp)
     id("com.google.gms.google-services")
 }
 
@@ -59,4 +60,15 @@ dependencies {
     
     // Coroutines for Firebase
     implementation(libs.kotlinxCoroutinesPlayServices)
+    
+    // Room Database
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    
+    // WorkManager for background sync
+    implementation(libs.androidx.work.runtime.ktx)
+    
+    // Gson for JSON serialization
+    implementation(libs.gson)
 }

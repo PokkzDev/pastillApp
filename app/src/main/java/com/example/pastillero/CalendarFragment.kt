@@ -212,7 +212,7 @@ class CalendarFragment : Fragment() {
         lifecycleScope.launch {
             try {
                 val eventsForDate = withContext(Dispatchers.IO) {
-                    PillEventFirestoreService.getEventsForDate(userId, selectedDate)
+                    PillEventFirestoreService.getEventsForDate(userId, selectedDate, requireContext())
                 }
                 
                 Log.d(TAG, "Loaded ${eventsForDate.size} events from Firestore")
@@ -311,17 +311,28 @@ class CalendarFragment : Fragment() {
             
             lifecycleScope.launch {
                 try {
+                    // Check network status before adding
+                    val isOnline = withContext(Dispatchers.IO) {
+                        NetworkUtils.isNetworkAvailable(requireContext())
+                    }
+                    
                     val success = withContext(Dispatchers.IO) {
-                        PillEventFirestoreService.addEvent(userId, newEvent)
+                        PillEventFirestoreService.addEvent(userId, newEvent, requireContext())
                     }
                     
                     withContext(Dispatchers.Main) {
                         if (success) {
                             loadEventsForSelectedDate()
+                            // Show different message based on network status
+                            val message = if (isOnline) {
+                                getString(R.string.event_added_success)
+                            } else {
+                                getString(R.string.event_added_offline)
+                            }
                             Toast.makeText(
                                 requireContext(),
-                                getString(R.string.event_added_success),
-                                Toast.LENGTH_SHORT
+                                message,
+                                Toast.LENGTH_LONG // Longer toast for offline message
                             ).show()
                             dialog.dismiss()
                         } else {
@@ -358,7 +369,7 @@ class CalendarFragment : Fragment() {
                 lifecycleScope.launch {
                     try {
                         val success = withContext(Dispatchers.IO) {
-                            PillEventFirestoreService.deleteEvent(event.id)
+                            PillEventFirestoreService.deleteEvent(event.id, requireContext())
                         }
                         
                         withContext(Dispatchers.Main) {

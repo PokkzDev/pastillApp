@@ -138,6 +138,7 @@
     <string name="error_empty_pill_name">Debe ingresar el nombre del medicamento</string>
     <string name="error_empty_amount">Debe ingresar la cantidad</string>
     <string name="event_added_success">Medicamento agregado correctamente</string>
+    <string name="event_added_offline">Medicamento guardado (modo offline, se sincronizará cuando haya conexión)</string>
     <string name="event_deleted_success">Medicamento eliminado</string>
     <string name="error_loading_events">Error al cargar eventos</string>
     <string name="error_not_logged_in">Debe iniciar sesión para agregar eventos</string>

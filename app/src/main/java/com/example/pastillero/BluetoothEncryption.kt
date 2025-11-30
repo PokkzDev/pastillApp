@@ -79,11 +79,23 @@ object BluetoothEncryption {
      */
     fun decrypt(encryptedText: String): String? {
         return try {
-            // Decodificar Base64
-            val combined = Base64.decode(encryptedText, Base64.NO_WRAP)
+            // Validar entrada
+            if (encryptedText.isEmpty()) {
+                Log.e(TAG, "Error: texto encriptado vacío")
+                return null
+            }
             
+            // Decodificar Base64
+            val combined = try {
+                Base64.decode(encryptedText, Base64.NO_WRAP)
+            } catch (e: IllegalArgumentException) {
+                Log.e(TAG, "Error: Base64 inválido - ${e.message}")
+                return null
+            }
+            
+            // Validar tamaño mínimo (IV + al menos un bloque)
             if (combined.size < IV_SIZE) {
-                Log.e(TAG, "Mensaje encriptado demasiado corto")
+                Log.e(TAG, "Error: mensaje demasiado corto (${combined.size} bytes, mínimo ${IV_SIZE})")
                 return null
             }
             
@@ -91,8 +103,22 @@ object BluetoothEncryption {
             val iv = ByteArray(IV_SIZE)
             System.arraycopy(combined, 0, iv, 0, IV_SIZE)
             
-            val encrypted = ByteArray(combined.size - IV_SIZE)
-            System.arraycopy(combined, IV_SIZE, encrypted, 0, encrypted.size)
+            val encryptedSize = combined.size - IV_SIZE
+            if (encryptedSize <= 0) {
+                Log.e(TAG, "Error: no hay datos encriptados después del IV")
+                return null
+            }
+            
+            // Validar que el tamaño encriptado sea múltiplo del tamaño de bloque (16 bytes)
+            val BLOCK_SIZE = 16
+            if (encryptedSize % BLOCK_SIZE != 0) {
+                Log.e(TAG, "Error: tamaño encriptado inválido (${encryptedSize} bytes, debe ser múltiplo de $BLOCK_SIZE)")
+                Log.d(TAG, "Datos recibidos (raw): $encryptedText")
+                return null
+            }
+            
+            val encrypted = ByteArray(encryptedSize)
+            System.arraycopy(combined, IV_SIZE, encrypted, 0, encryptedSize)
             
             val ivSpec = IvParameterSpec(iv)
             
@@ -102,8 +128,23 @@ object BluetoothEncryption {
             val decrypted = cipher.doFinal(encrypted)
             
             String(decrypted, Charsets.UTF_8)
+        } catch (e: javax.crypto.BadPaddingException) {
+            Log.e(TAG, "Error: padding inválido - posible corrupción de datos o clave incorrecta", e)
+            Log.d(TAG, "Datos recibidos (raw): $encryptedText")
+            null
+        } catch (e: javax.crypto.IllegalBlockSizeException) {
+            Log.e(TAG, "Error: tamaño de bloque inválido", e)
+            Log.d(TAG, "Datos recibidos (raw): $encryptedText")
+            null
+        } catch (e: java.security.InvalidAlgorithmParameterException) {
+            Log.e(TAG, "Error: parámetros de algoritmo inválidos", e)
+            null
+        } catch (e: java.security.InvalidKeyException) {
+            Log.e(TAG, "Error: clave inválida", e)
+            null
         } catch (e: Exception) {
-            Log.e(TAG, "Error desencriptando mensaje", e)
+            Log.e(TAG, "Error desencriptando mensaje: ${e.javaClass.simpleName} - ${e.message}", e)
+            Log.d(TAG, "Datos recibidos (raw): $encryptedText")
             null
         }
     }

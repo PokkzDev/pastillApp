@@ -197,6 +197,54 @@ class BluetoothConnectionService : Service() {
     }
 
     /**
+     * Envía eventos de pastillas al ESP32 en formato JSON
+     * @param events Lista de eventos a enviar
+     */
+    fun sendPillEventsToESP32(events: List<PillEvent>) {
+        if (events.isEmpty()) {
+            Log.d(TAG, "No hay eventos para enviar")
+            return
+        }
+
+        if (!isConnected) {
+            Log.w(TAG, "No conectado, no se pueden enviar eventos")
+            return
+        }
+
+        serviceScope.launch {
+            try {
+                // Convertir eventos a formato JSON simple
+                val gson = com.google.gson.Gson()
+                val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                
+                // Crear lista de objetos simples para JSON
+                val eventList = events.map { event ->
+                    mapOf(
+                        "id" to event.id,
+                        "date" to dateFormat.format(event.date),
+                        "pillName" to event.pillName,
+                        "amount" to event.amount,
+                        "time" to event.time,
+                        "dispensed" to event.dispensed
+                    )
+                }
+                
+                val jsonArray = gson.toJson(eventList)
+                val command = "SET_EVENTS:$jsonArray"
+                
+                Log.d(TAG, "Enviando ${events.size} eventos al ESP32")
+                
+                // Enviar comando (será encriptado por sendCommand)
+                sendCommand(command)
+                
+                Log.d(TAG, "Eventos enviados exitosamente")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error enviando eventos al ESP32", e)
+            }
+        }
+    }
+
+    /**
      * Registra un listener para eventos de conexión
      */
     fun addConnectionListener(listener: BluetoothConnectionListener) {
@@ -379,9 +427,22 @@ class BluetoothConnectionService : Service() {
     private fun processReceivedData(data: String) {
         Log.d(TAG, "Datos recibidos (raw): $data")
         
+        // Validar tamaño mínimo antes de intentar desencriptar
+        // Un mensaje encriptado válido debe tener al menos:
+        // - IV (16 bytes) = ~22 caracteres Base64
+        // - Al menos 1 bloque encriptado (16 bytes) = ~22 caracteres Base64
+        // Total mínimo: ~44 caracteres Base64
+        val MIN_ENCRYPTED_LENGTH = 32 // Mínimo razonable para datos encriptados
+        
         // Intentar desencriptar el mensaje
         var decryptedData = data
-        if (BluetoothEncryption.isEncrypted(data)) {
+        if (data.length >= MIN_ENCRYPTED_LENGTH && BluetoothEncryption.isEncrypted(data)) {
+            // Validar que el tamaño sea razonable (no demasiado grande)
+            if (data.length > 1024) {
+                Log.w(TAG, "Datos recibidos demasiado grandes (${data.length} chars), ignorando")
+                return
+            }
+            
             val decrypted = BluetoothEncryption.decrypt(data)
             if (decrypted != null) {
                 decryptedData = decrypted
@@ -390,6 +451,9 @@ class BluetoothConnectionService : Service() {
                 Log.w(TAG, "No se pudo desencriptar, procesando como texto plano")
                 // Intentar procesar como texto plano (compatibilidad hacia atrás)
             }
+        } else if (data.length >= MIN_ENCRYPTED_LENGTH) {
+            // Datos parecen encriptados pero no pasaron la validación
+            Log.w(TAG, "Datos de tamaño suficiente pero no válidos como Base64 encriptado")
         }
         
         when {

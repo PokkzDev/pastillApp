@@ -19,6 +19,12 @@ class MainActivity : AppCompatActivity() {
         SessionManager.init(this)
         SessionManager.updateLastActivity()
         
+        // Initialize PillEventFirestoreService with context for offline support
+        PillEventFirestoreService.initialize(this)
+        
+        // Start periodic sync service
+        PillEventSyncService.startPeriodicSync(this)
+        
         setContentView(R.layout.activity_main)
 
         navView = findViewById(R.id.nav_view)

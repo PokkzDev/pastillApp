@@ -54,6 +54,15 @@ class PillDispensingService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        
+        // Set up callback to send events to ESP32 when added offline
+        PillEventFirestoreService.onOfflineEventAdded = { event ->
+            if (bluetoothService?.isConnected() == true && !NetworkUtils.isNetworkAvailable(this)) {
+                Log.d(TAG, "New event added offline, sending to ESP32: ${event.id}")
+                bluetoothService?.sendPillEventsToESP32(listOf(event))
+            }
+        }
+        
         Log.d(TAG, "PillDispensingService created")
     }
 
@@ -78,6 +87,10 @@ class PillDispensingService : Service() {
         super.onDestroy()
         stopPolling()
         serviceScope.cancel()
+        
+        // Clear callback
+        PillEventFirestoreService.onOfflineEventAdded = null
+        
         Log.d(TAG, "PillDispensingService destroyed")
     }
 
@@ -126,7 +139,7 @@ class PillDispensingService : Service() {
     }
 
     /**
-     * Checks Firestore for today's pill events and dispenses if conditions are met
+     * Checks Firestore or local storage for today's pill events and dispenses if conditions are met
      */
     private suspend fun checkAndDispensePills() {
         val auth = FirebaseAuthClient.auth
@@ -142,8 +155,38 @@ class PillDispensingService : Service() {
         
         Log.d(TAG, "Checking for pill events for user: $userId")
         
-        // Get today's events from Firestore
-        val events = PillEventFirestoreService.getEventsForDate(userId, today)
+        // Check network connectivity
+        val isOnline = NetworkUtils.isNetworkAvailable(this)
+        Log.d(TAG, "Network status: ${if (isOnline) "online" else "offline"}")
+        
+        // Get today's events from Firestore or local storage
+        val events = PillEventFirestoreService.getEventsForDate(userId, today, this)
+        
+        // If online, try to sync local events to Firebase
+        if (isOnline) {
+            try {
+                val syncedCount = PillEventFirestoreService.syncLocalEventsToFirebase(userId, this)
+                if (syncedCount > 0) {
+                    Log.d(TAG, "Synced $syncedCount events to Firebase")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error syncing events to Firebase", e)
+            }
+        } else {
+            // If offline and connected to ESP32, send local events to ESP32
+            if (bluetoothService?.isConnected() == true) {
+                try {
+                    val localRepo = com.pokkzdev.pastillapp.database.PillEventLocalRepository(this)
+                    val allLocalEvents = localRepo.getAllUnsyncedEvents(userId)
+                    if (allLocalEvents.isNotEmpty()) {
+                        Log.d(TAG, "Sending ${allLocalEvents.size} local events to ESP32 (offline mode)")
+                        bluetoothService?.sendPillEventsToESP32(allLocalEvents)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error sending events to ESP32", e)
+                }
+            }
+        }
         
         if (events.isEmpty()) {
             Log.d(TAG, "No events found for today")
@@ -237,8 +280,8 @@ class PillDispensingService : Service() {
             // Wait a moment to ensure command was sent
             delay(500)
             
-            // Mark event as dispensed in Firestore
-            val success = PillEventFirestoreService.markEventAsDispensed(event.id)
+            // Mark event as dispensed in Firestore and local storage
+            val success = PillEventFirestoreService.markEventAsDispensed(event.id, this)
             
             if (success) {
                 Log.d(TAG, "Event ${event.id} marked as dispensed in Firestore")
