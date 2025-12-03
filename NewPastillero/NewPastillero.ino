@@ -252,9 +252,17 @@ void enviarEvento(const char* evento) {
  * Abre el compartimento e inicia el modo ABIERTO
  */
 void iniciarAbierto() {
+  Serial.println("[SERVO] Iniciando apertura del compartimento...");
+  Serial.print("[SERVO] Moviendo de ");
+  Serial.print(anguloActual);
+  Serial.print(" a ");
+  Serial.println(ANGULO_ABIERTO);
+  
   moverSuave(servoMotor, anguloActual, ANGULO_ABIERTO, DURACION_MOV);
   anguloActual = ANGULO_ABIERTO;
   estado = ABIERTO;
+  
+  Serial.println("[SERVO] Servo movido a posición abierta");
 
   // LED parpadeo normal
   estadoLED = LOW;
@@ -263,6 +271,8 @@ void iniciarAbierto() {
 
   // Buzzer continuo si no está silenciado
   digitalWrite(PIN_ZUMBADOR, alarmaSilenciada ? LOW : HIGH);
+  Serial.print("[BUZZER] Estado: ");
+  Serial.println(alarmaSilenciada ? "SILENCIADO" : "ACTIVO");
 
   // Reset detección LDR
   cambioDetectado = false;
@@ -274,6 +284,7 @@ void iniciarAbierto() {
   // Notificar evento
   notificacionAbierto = true;
   enviarEvento("OPENED");
+  Serial.println("[EVENT] Evento OPENED enviado");
 }
 
 /**
@@ -344,6 +355,10 @@ void silenciarAlarma() {
  * ISO 27001 A.10.1.2 - Política sobre el uso de controles criptográficos
  */
 bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize) {
+  Serial.print("[AES] Intentando desencriptar mensaje de ");
+  Serial.print(strlen(encryptedBase64));
+  Serial.println(" caracteres");
+  
   mbedtls_aes_context aes;
   mbedtls_aes_init(&aes);
   
@@ -351,6 +366,7 @@ bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize
   size_t olen;
   unsigned char* decoded = (unsigned char*)malloc(strlen(encryptedBase64) * 3 / 4 + 1);
   if (!decoded) {
+    Serial.println("[AES] Error: no se pudo asignar memoria para decodificación");
     mbedtls_aes_free(&aes);
     return false;
   }
@@ -358,10 +374,18 @@ bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize
   int ret = mbedtls_base64_decode(decoded, strlen(encryptedBase64) * 3 / 4 + 1, &olen, 
                                    (const unsigned char*)encryptedBase64, strlen(encryptedBase64));
   if (ret != 0 || olen < AES_IV_SIZE) {
+    Serial.print("[AES] Error decodificando Base64, ret=");
+    Serial.print(ret);
+    Serial.print(", olen=");
+    Serial.println(olen);
     free(decoded);
     mbedtls_aes_free(&aes);
     return false;
   }
+  
+  Serial.print("[AES] Base64 decodificado: ");
+  Serial.print(olen);
+  Serial.println(" bytes");
   
   // Determinar si tiene HMAC (formato nuevo) o no (formato legacy)
   // Formato nuevo: IV(16) + CipherText(múltiplo de 16) + HMAC(32)
@@ -376,6 +400,9 @@ bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize
     if (possibleEncLen > 0 && (possibleEncLen % AES_BLOCK_SIZE) == 0) {
       hasHMAC = true;
       encryptedLen = possibleEncLen;
+      Serial.print("[AES] Formato con HMAC detectado, datos encriptados: ");
+      Serial.print(encryptedLen);
+      Serial.println(" bytes");
     }
   }
   
@@ -384,12 +411,17 @@ bool decryptCommand(const char* encryptedBase64, char* output, size_t outputSize
     encryptedLen = olen - AES_IV_SIZE;
     if (encryptedLen == 0 || (encryptedLen % AES_BLOCK_SIZE) != 0) {
       Serial.print("[AES] Error: tamaño encriptado inválido: ");
-      Serial.println(encryptedLen);
+      Serial.print(encryptedLen);
+      Serial.print(" (debe ser múltiplo de ");
+      Serial.print(AES_BLOCK_SIZE);
+      Serial.println(")");
       free(decoded);
       mbedtls_aes_free(&aes);
       return false;
     }
-    Serial.println("[AES] Advertencia: mensaje sin HMAC (formato legacy)");
+    Serial.print("[AES] Advertencia: mensaje sin HMAC (formato legacy), datos: ");
+    Serial.print(encryptedLen);
+    Serial.println(" bytes");
   }
   
   // Extraer IV
@@ -938,11 +970,17 @@ bool parseEventFromJson(String json, PillEvent* event) {
  * @param cmd Comando recibido (ya trimmeado, puede estar encriptado)
  */
 void procesarComando(String cmd) {
+  Serial.print("[BT] Comando recibido (raw): ");
+  Serial.println(cmd);
+  Serial.print("[BT] Longitud: ");
+  Serial.println(cmd.length());
+  
   // Intentar desencriptar el comando
   char decryptedCmd[128];
   bool wasEncrypted = false;
   
   if (isEncrypted(cmd.c_str())) {
+    Serial.println("[BT] Comando parece encriptado, intentando desencriptar...");
     if (decryptCommand(cmd.c_str(), decryptedCmd, sizeof(decryptedCmd))) {
       cmd = String(decryptedCmd);
       wasEncrypted = true;
@@ -953,11 +991,16 @@ void procesarComando(String cmd) {
       SerialBT.println("ERROR:DECRYPT_FAILED");
       return;
     }
+  } else {
+    Serial.println("[BT] Comando en texto plano (no encriptado)");
   }
   
   // Convertir a mayúsculas para comparación (excepto SET_UUID que tiene datos)
   String cmdUpper = cmd;
   cmdUpper.toUpperCase();
+  
+  Serial.print("[BT] Procesando comando: ");
+  Serial.println(cmdUpper);
   
   // === PING - Heartbeat ===
   if (cmdUpper == "PING") {
@@ -1028,10 +1071,17 @@ void procesarComando(String cmd) {
   
   // === PASTILLA - Abrir compartimento ===
   if (cmdUpper == "PASTILLA") {
+    Serial.println("[BT] Comando PASTILLA recibido!");
+    Serial.print("[BT] Estado actual: ");
+    Serial.println(getNombreEstado());
+    
     if (estado == CERRADO) {
+      Serial.println("[BT] Iniciando apertura del compartimento...");
       iniciarAbierto();
       sendEncryptedResponse("OK:ABRIENDO", wasEncrypted);
+      Serial.println("[BT] Compartimento abierto!");
     } else {
+      Serial.println("[BT] Compartimento ya está abierto");
       sendEncryptedResponse("WARN:YA_ABIERTO", wasEncrypted);
     }
     return;
@@ -1229,14 +1279,21 @@ void loop() {
     lastActivityTime = now;
     
     if (!uuidEnviado && strlen(deviceUUID) > 0) {
+      Serial.println("[BT] *** CLIENTE CONECTADO ***");
+      Serial.print("[BT] UUID del dispositivo: ");
+      Serial.println(deviceUUID);
+      
       enviarEvento("CONNECTED");
       SerialBT.print("UUID:");
       SerialBT.println(deviceUUID);
       enviarEstado();
       uuidEnviado = true;
+      
+      Serial.println("[BT] Información inicial enviada al cliente");
     }
   } else {
     if (uuidEnviado) {
+      Serial.println("[BT] *** CLIENTE DESCONECTADO ***");
       uuidEnviado = false;
     }
     
@@ -1258,10 +1315,22 @@ void loop() {
 
   // --- Procesar comandos Bluetooth ---
   if (SerialBT.available()) {
+    Serial.print("[BT] Datos disponibles: ");
+    Serial.print(SerialBT.available());
+    Serial.println(" bytes");
+    
     String cmd = SerialBT.readStringUntil('\n');
     cmd.trim();
+    Serial.print("[BT] Comando leído: '");
+    Serial.print(cmd);
+    Serial.print("' (longitud: ");
+    Serial.print(cmd.length());
+    Serial.println(")");
+    
     if (cmd.length() > 0) {
       procesarComando(cmd);
+    } else {
+      Serial.println("[BT] Comando vacío, ignorando");
     }
   }
 

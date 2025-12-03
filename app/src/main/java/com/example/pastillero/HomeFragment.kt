@@ -186,11 +186,14 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
     }
 
     private fun setupClickListeners() {
+        android.util.Log.d("HomeFragment", "setupClickListeners() - openCompartmentButton: $openCompartmentButton")
+        
         goToConnectionButton?.setOnClickListener {
             navigateToConnection()
         }
         
         openCompartmentButton?.setOnClickListener {
+            android.util.Log.d("HomeFragment", "openCompartmentButton clicked!")
             openCompartment()
         }
         
@@ -361,18 +364,30 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
     }
 
     private fun openCompartment() {
-        if (bluetoothService?.isConnected() != true) {
+        android.util.Log.d("HomeFragment", "openCompartment() called")
+        
+        if (bluetoothService == null) {
+            android.util.Log.e("HomeFragment", "bluetoothService is null")
             Toast.makeText(requireContext(), getString(R.string.device_not_connected), Toast.LENGTH_SHORT).show()
             return
         }
         
+        if (bluetoothService?.isConnected() != true) {
+            android.util.Log.e("HomeFragment", "bluetoothService is not connected")
+            Toast.makeText(requireContext(), getString(R.string.device_not_connected), Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        android.util.Log.d("HomeFragment", "Sending PASTILLA command...")
         openCompartmentButton?.isEnabled = false
         
         lifecycleScope.launch {
             try {
                 bluetoothService?.sendCommand("PASTILLA")
+                android.util.Log.d("HomeFragment", "PASTILLA command sent successfully")
                 Toast.makeText(requireContext(), getString(R.string.compartment_opened), Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
+                android.util.Log.e("HomeFragment", "Error sending PASTILLA command", e)
                 Toast.makeText(requireContext(), getString(R.string.error_opening_compartment), Toast.LENGTH_SHORT).show()
             } finally {
                 openCompartmentButton?.isEnabled = true
@@ -381,18 +396,30 @@ class HomeFragment : Fragment(), BluetoothConnectionListener {
     }
 
     private fun silenceAlarm() {
-        if (bluetoothService?.isConnected() != true) {
+        android.util.Log.d("HomeFragment", "silenceAlarm() called")
+        
+        if (bluetoothService == null) {
+            android.util.Log.e("HomeFragment", "bluetoothService is null")
             Toast.makeText(requireContext(), getString(R.string.device_not_connected), Toast.LENGTH_SHORT).show()
             return
         }
         
+        if (bluetoothService?.isConnected() != true) {
+            android.util.Log.e("HomeFragment", "bluetoothService is not connected")
+            Toast.makeText(requireContext(), getString(R.string.device_not_connected), Toast.LENGTH_SHORT).show()
+            return
+        }
+        
+        android.util.Log.d("HomeFragment", "Sending SILENCIAR command...")
         silenceAlarmButton?.isEnabled = false
         
         lifecycleScope.launch {
             try {
                 bluetoothService?.sendCommand("SILENCIAR")
+                android.util.Log.d("HomeFragment", "SILENCIAR command sent successfully")
                 Toast.makeText(requireContext(), getString(R.string.alarm_silenced), Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
+                android.util.Log.e("HomeFragment", "Error sending SILENCIAR command", e)
                 Toast.makeText(requireContext(), getString(R.string.error_silencing_alarm), Toast.LENGTH_SHORT).show()
             } finally {
                 silenceAlarmButton?.isEnabled = true

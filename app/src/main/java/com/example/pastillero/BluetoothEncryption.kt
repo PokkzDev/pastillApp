@@ -38,8 +38,6 @@ object BluetoothEncryption {
         0x92.toByte(), 0xA3.toByte(), 0xB4.toByte(), 0xC5.toByte(), 0xD6.toByte(), 0xE7.toByte(), 0xF8.toByte(), 0x09.toByte()
     )
     
-    // Clave separada para HMAC-SHA256 (32 bytes = 256 bits)
-    // Derivada de la clave AES con XOR para separar propósitos (best practice)
     private val HMAC_KEY = byteArrayOf(
         0x5A.toByte(), 0x1D.toByte(), 0x3E.toByte(), 0x4F.toByte(), 0x6C.toByte(), 0x7B.toByte(), 0x8A.toByte(), 0x9D.toByte(),
         0xC2.toByte(), 0xD3.toByte(), 0xE4.toByte(), 0xF5.toByte(), 0x06.toByte(), 0x17.toByte(), 0x28.toByte(), 0x39.toByte(),
