@@ -15,7 +15,7 @@ import javax.crypto.spec.SecretKeySpec
  */
 object BluetoothEncryption {
     private const val TAG = "BluetoothEncryption"
-    private const val ALGORITHM = "AES"
+    private const val ALGORITHM = "AES" 
     private const val TRANSFORMATION = "AES/CBC/PKCS5Padding"
     private const val KEY_SIZE = 32 // 256 bits
     private const val IV_SIZE = 16 // 128 bits

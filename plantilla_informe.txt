@@ -1,0 +1,125 @@
+
+	
+
+
+ 
+
+Contenido
+I.	Introducción	3
+II.	Objetivos	3
+III.	Desarrollo	3
+IV.	Conclusiones	3
+V.	Referencias bibliográficas	4
+
+
+ Una vez finalizado el informe, actualice esta tabla de contenidos, ubicando el mouse sobre ella, y pulsando el botón derecho del mouse. Actualícela en su totalidad y déjela en una página independiente de la Introducción. Finalmente elimina este texto. 
+ 
+I.	Introducción 
+Presentación de la temática desarrollada en el informe. Esta página se debe incluir información de manera resumida respecto de los temas que se abordarán en las siguientes páginas.
+
+(Se recomienda redactar este apartado al finalizar el informe, en tercera persona y en tiempo pasado).
+
+Máximo 1 página de extensión, el informe debe contar con 25 páginas como máximo.
+
+ 
+II.	Objetivos
+En este apartado se exponen los objetivos del informe. Es importante que para la redacción de estos puedas revisar el o los objetivos de aprendizaje de la actividad o evaluación, de manera que exista coherencia entre ambos (máximo una página de extensión).
+
+Máximo 1 página de extensión
+Recuerde separar los objetivos en uno de carácter general y otros de carácter específico, la redacción de esto es en tiempo presente y siempre en tercera persona.
+
+ 
+III.	Uso de Microcontrolador, Integrando Sensores y Actuadores
+3.1	 Selección del Microcontrolador 
+Justifique la elección del microcontrolador basado en requisitos de la aplicación.
+3.2	Integración de Sensores
+Describa los sensores utilizados, su propósito y cómo se integran con el microcontrolador.
+3.3	 Integración de Actuadores
+Detalle los actuadores empleados y su conexión con el microcontrolador.
+3.4	 Esquema de Conexión
+Diagrame la conexión y circuitos.
+3.5	 Pruebas y Validación
+Detalle los métodos de prueba utilizados para asegurar la correcta integración y funcionamiento de sensores y actuadores.
+
+IV.	Empleo de Antenas Inalámbricas
+3.6	 Selección de Antenas
+Justifique la elección de la antena inalámbrica basado en requisitos de la aplicación.
+3.7	 Integración con el Microcontrolador
+Describa el procedimiento utilizado en la integración de la antena con el microcontrolador.
+3.8	 Configuración y Programación
+Detalle y explique lo programado respecto a la antena inalámbrica.
+3.9	 Consideraciones de Seguridad
+Describa que consideraciones de seguridad fueron implementadas para proteger la comunicación inalámbrica, sugiera una en caso de contar con ellas.
+ 
+
+V.	Aplicación Móvil e IoT
+3.10	Requisitos de la Aplicación
+Detalle los requisitos de su aplicación.
+3.11	Diseño de la aplicación
+Presente gráficamente las interfaces gráficas de su aplicación y describa cada una de ellas.
+3.12	 Integración de Hardware
+Indique los métodos utilizados para comunicación de la aplicación móvil con el microcontrolador.
+3.13	 Pruebas y validación
+Detalle las pruebas realizadas en la implementación de la aplicación móvil.
+3.14	 Escalabilidad
+Indique que funcionalidades agregaría a su aplicación pensando en la implementación en la industria. 
+
+VI.	Análisis de entornos posibles
+3.15	Identificación de entornos 
+Describa los posibles entornos donde se podría implementar su solución IoT. Al menos 3.
+3.16	Evaluación de factibilidad
+Describa tanto técnicamente como económicamente la factibilidad de implementar su solución en los entornos mencionados anteriormente.
+3.17	 Cumplimiento de Estándares OT
+Detalle como su proyecto se alinea con los estándares de la industria OT (Operational Technology).
+3.18	 Impacto de Limitaciones y Restricciones
+Evalúe las limitaciones y restricciones específicas para cada entorno.
+3.19	 Pruebas y Validación
+Detalle los métodos de prueba utilizados para asegurar la correcta integración y funcionamiento de sensores y actuadores.
+3.20	Recomendaciones
+Realice sugerencias para optimizar la implementación en cada entorno.
+
+
+
+
+ 
+4	Conclusiones
+
+Presentar las conclusiones preliminares según el grado de avance del trabajo, donde se expongan ideas principales y algunas ideas personales en torno al tema. También puede incorporar ideas fuerza y/o aportes a partir del trabajo desarrollado.
+
+También es posible incorporar reflexiones, incluso dejar propuestas de profundización que no fueron posibles de abordar en este proceso.
+
+
+
+Mínimo  1 páginas de extensión
+
+Recuerda hacer conclusiones respecto del trabajo desarrollado centrándote en los aportes de este. No es conveniente que pongas tus opiniones o juicio de valor personal, a menos que estos estén en concordancia con las fuentes consultadas.
+ 
+5	Referencias bibliográficas
+
+Citar las fuentes en formato APA.
+
+
+Ejemplo de referencias bibliográficas (interlineado sencillo y sangría francesa):
+
+Audesirk T., Audesirk G., Byers, B. (2008). Biología: La vida en la Tierra. México: Pearson Educación. 
+Vargas, A. y Palacios, P. (2014). Educación para la salud [Monografía]. Recuperado de http://site.ebrary.com/lib/inacapsp/reader.action?docID=11046190&ppg=3
+
+
+
+Aspectos de forma y estilo
+a)	Considere como guía el presente documento, y los siguientes elementos (puede ser modificado):
+
+•	Formato: tiene dos opciones para entregar el informe: documento de Word o convertirlo en PDF. 
+•	Papel tamaño carta. Márgenes estándar (superior e inferior de 2,5 cm. izquierdo y derecho de 2,5 cm).
+•	Párrafos: alineación justificada, interlineado sencillo. 
+•	Tipo de letra o fuente: Arial o Calibri (Cuerpo). 
+•	Tamaño títulos: 14 y en negrita
+•	Tamaño subtítulos: 12 y en negrita.
+•	Tamaño textos: 11 normal.
+
+
+
+
+Para realizar un listado de las fuentes bibliográficas utilizadas para la recopilación de información, con el título “Referencias bibliográficas”, según Norma APA 6° Edición. Se sugiere descargar la Guía para citas y referencias bibliográficas según Norma APA, en el sitio web de INACAP, en la Red de Bibliotecas.
+
+Una vez finalizado el informe, elimina las instrucciones y ejemplos.
